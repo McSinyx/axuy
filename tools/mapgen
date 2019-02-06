@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+from itertools import chain
+from sys import argv
+
+from numpy import fliplr, flipud, frombuffer, fromiter, save, stack
+
+BASES = ('000111000000111000000000000', '000111000000111000000111000',
+         '000111000000111111000000000', '000111000111111111000000000',
+         '000111000111111111000111000', '000111000111111111010010010')
+
+
+def chainmap(sequence, *functions):
+    """Composingly chain and map sequence according to functions."""
+    if not functions: return sequence
+    first, *rest = functions
+    return chainmap(chain.from_iterable(map(first, sequence)), *rest)
+
+
+def permute(bases):
+    """Return rotations (possibly with duplication) of base nodes."""
+    return chainmap(bases,
+                    lambda a: (a, fliplr(a)),
+                    lambda a: (a, flipud(a)),
+                    lambda a: (a, a.swapaxes(1, 2)),
+                    lambda a: (a, a.swapaxes(0, 1), a.swapaxes(0, 2)))
+
+
+p = permute(fromiter(map(int, base), bool).reshape(3, 3, 3) for base in BASES)
+uniques = [frombuffer(s, bool) for s in set(node.tobytes() for node in p)]
+
+try:
+    with open(argv[1], 'w+b') as f: save(f, stack(uniques))
+except (IndexError, IOError):
+    print('Usage: mapgen output-file')
