@@ -23,7 +23,7 @@ from random import random
 import glfw
 import moderngl
 import numpy as np
-from pyrr import Matrix44
+from pyrr import matrix33, Matrix44
 
 from .misc import hex2f4, resource_filename
 
@@ -36,7 +36,7 @@ OYZ = np.float32([[0, 0, 0], [0, 1, 0], [0, 1, 1],
 OZX = np.float32([[0, 0, 0], [1, 0, 0], [1, 0, 1],
                   [1, 0, 1], [0, 0, 1], [0, 0, 0]])
 NEIGHBORS = set(chain.from_iterable(map(
-    permutations, combinations_with_replacement(range(-1, 2), 3))))
+    permutations, combinations_with_replacement((-1, 0, 1), 3))))
 
 SPEED = 2
 MOUSE_SPEED = 1
@@ -65,10 +65,12 @@ class View:
         Processed executable code in GLSL.
     vao : moderngl.VertexArray
         Vertex data of the map.
-    pos : np.ndarray of np.float32
+    x, y, z : floats
         Camera position.
-    hangle, vangle : floats
-        Viewing angle.
+    pos : np.ndarray of np.float32
+        Camera position in a numpy array.
+    rotation : np.ndarray of np.float32
+        Rotational matrix.
     forward, up, right : np.ndarray of np.float32
         Directions.
     fps : float
@@ -93,15 +95,37 @@ class View:
         vbo = context.buffer(np.stack(vertices).astype('f4').tobytes())
         self.vao = context.simple_vertex_array(self.prog, vbo, 'in_vert')
 
-        x, y, z = random()*12, random()*12, random()*9
-        while self.space[int(x)][int(y)][int(z)]:
-            x, y, z = random()*12, random()*12, random()*9
-        self.pos = np.float32([x, y, z])
-        self.hangle = random() * pi * 2
-        self.vangle = 0
-        self.set_directions()
+        self.x, self.y, self.z = random()*12, random()*12, random()*9
+        while self.space[int(self.x)][int(self.y)][int(self.z)]:
+            self.x, self.y, self.z = random()*12, random()*12, random()*9
+        self.rotation = np.float32([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
 
         self.fps = 60.0
+
+    @property
+    def pos(self):
+        """Return camera position in a numpy array."""
+        return np.float32([self.x, self.y, self.z])
+
+    @pos.setter
+    def pos(self, postion):
+        """Set camera postion."""
+        self.x, self.y, self.z = postion
+
+    @property
+    def right(self):
+        """Return right direction."""
+        return self.rotation[0]
+
+    @property
+    def upward(self):
+        """Return upward direction."""
+        return self.rotation[1]
+
+    @property
+    def forward(self):
+        """Return forward direction."""
+        return self.rotation[2]
 
     def set_cube(self, x, y, z):
         """Mark occupied space and faces for rendering."""
@@ -114,21 +138,12 @@ class View:
             self.ozx.update(((xt, yt, zt), (xt, jt, zt)))
         self.space[x][y][z] = 1
 
-    def set_directions(self):
-        """Set forward, up and right directions based on view angle."""
-        self.forward = np.float32([cos(self.vangle) * sin(self.hangle),
-                                   sin(self.vangle),
-                                   cos(self.vangle) * cos(self.hangle)])
-        self.right = np.float32([-cos(self.hangle), 0, sin(self.hangle)])
-        self.up = np.cross(self.right, self.forward)
-
     def move(self, direction):
         """Move camera in the given direction."""
         dr = direction / self.fps * SPEED
         i, j, k = self.pos + dr
         if not self.space[int(i%12)][int(j%12)][int(k%9)]: self.pos += dr
-        x, y, z = self.pos
-        self.pos = x%12, y%12, z%9
+        self.pos = self.x % 12, self.y % 12, self.z % 9
 
     def look(self, window, xpos, ypos):
         """Look according to cursor position.
@@ -136,18 +151,14 @@ class View:
         Present as a callback for GLFW CursorPos event.
         """
         center = np.float32(glfw.get_window_size(window)) / 2
-        dh, dv = center - [xpos, ypos]
-        self.vangle += MOUSE_SPEED / self.fps * dv
-        if cos(self.vangle) > 0:
-            self.hangle += MOUSE_SPEED / self.fps * dh
-        else:
-            self.hangle -= MOUSE_SPEED / self.fps * dh
-        self.set_directions()
+        yaw, pitch = (center - [xpos, ypos]) / self.fps * MOUSE_SPEED
+        self.rotation = (matrix33.create_from_y_rotation(yaw) @
+                         matrix33.create_from_x_rotation(pitch) @ self.rotation)
 
     def render(self, width, height, fov):
         """Render the map."""
         proj = Matrix44.perspective_projection(fov, width/height, 0.0001, 4)
-        look = Matrix44.look_at(self.pos, self.pos + self.forward, self.up)
+        look = Matrix44.look_at(self.pos, self.pos + self.forward, self.upward)
         self.prog['mvp'].write((proj*look).astype(np.float32).tobytes())
         self.prog['eye'].write(np.float32(self.pos).tobytes())
         self.vao.render(moderngl.TRIANGLES)
