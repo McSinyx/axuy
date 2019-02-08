@@ -65,22 +65,23 @@ def main():
     mapid = list(range(48))
     shuffle(mapid)
     view = View(mapid, context)
-    glfw.set_cursor_pos_callback(window, view.look)
+    mypico = view.camera
+    glfw.set_cursor_pos_callback(window, mypico.look)
 
     last_time = glfw.get_time()
     while not glfw.window_should_close(window):
         next_time = glfw.get_time()
-        view.fps = 1 / (next_time-last_time)
+        mypico.fps = 1 / (next_time-last_time)
         last_time = next_time
 
         if glfw.get_key(window, glfw.KEY_UP) == glfw.PRESS:
-            view.move(view.forward)
+            mypico.move(forward=1)
         if glfw.get_key(window, glfw.KEY_DOWN) == glfw.PRESS:
-            view.move(-view.forward)
+            mypico.move(forward=-1)
         if glfw.get_key(window, glfw.KEY_LEFT) == glfw.PRESS:
-            view.move(-view.right)
+            mypico.move(right=-1)
         if glfw.get_key(window, glfw.KEY_RIGHT) == glfw.PRESS:
-            view.move(view.right)
+            mypico.move(right=1)
 
         width, height = glfw.get_window_size(window)
         context.viewport = 0, 0, width, height
