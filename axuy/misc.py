@@ -16,13 +16,34 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
+from itertools import chain, combinations_with_replacement, permutations
+
 import numpy
 import pkg_resources
 
+TANGO = {'Background': '2e3436',
+         'Butter': 'fce94f',
+         'Orange': 'fcaf3e',
+         'Chocolate': 'e9b96e',
+         'Chameleon': '8ae234',
+         'Sky Blue': '729fcf',
+         'Plum': 'ad7fa8',
+         'Scarlet Red': 'ef2929',
+         'Aluminium': 'eeeeec'}
 
-def hex2f4(hex_color):
-    """Return numpy float32 array of RGB colors from given hex_color."""
-    return numpy.float32([i / 255 for i in bytes.fromhex(hex_color)])
+
+def color(name):
+    """Return numpy float32 array of RGB colors from color name."""
+    return numpy.float32([i / 255 for i in bytes.fromhex(TANGO[name])])
+
+
+def neighbors(x, y, z):
+    """Return a generator of coordinates of images point (x, y, z)
+    in neighbor universes.
+    """
+    for i, j, k in set(chain.from_iterable(
+        map(permutations, combinations_with_replacement((-1, 0, 1), 3)))):
+        yield x + i*12, y + j*12, z + k*9
 
 
 def resource_filename(resource_name):

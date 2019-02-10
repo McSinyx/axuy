@@ -21,12 +21,12 @@ from random import shuffle
 import glfw
 import moderngl
 
-from .misc import hex2f4
+from .misc import color
 from .view import View
 
-FOV_INIT = 90
 FOV_MIN = 30
 FOV_MAX = 120
+FOV_INIT = (FOV_MIN+FOV_MAX) / 2
 
 
 def main():
@@ -52,6 +52,7 @@ def main():
 
     context = moderngl.create_context()
     context.enable(moderngl.BLEND)
+    context.enable(moderngl.DEPTH_TEST)
 
     fov = FOV_INIT
     def zoom(window, xoffset, yoffset):
@@ -85,7 +86,7 @@ def main():
 
         width, height = glfw.get_window_size(window)
         context.viewport = 0, 0, width, height
-        context.clear(*hex2f4('2e3436'))
+        context.clear(*color('Background'))
         view.render(width, height, fov)
 
         glfw.swap_buffers(window)

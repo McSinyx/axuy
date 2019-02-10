@@ -1,11 +1,13 @@
 #version 330
 
 uniform mat4 mvp;
-uniform vec3 eye;
+uniform vec3 camera;
+uniform float visibility;
+
 in vec3 in_vert;
-out float alpha;
+out float depth;
 
 void main() {
 	gl_Position = mvp * vec4(in_vert, 1.0);
-	alpha = 1 - distance(eye, in_vert) / 4;
+	depth = distance(camera, in_vert) / visibility;
 }
