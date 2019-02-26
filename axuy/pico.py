@@ -26,6 +26,8 @@ import numpy as np
 from pyrr import matrix33
 
 BASE = np.float32([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
+RP = 1 / 4  # radius of a Picobot
+
 SPEED = 2
 MOUSE_SPEED = 1/8
 
@@ -54,15 +56,15 @@ class Picobot:
         Currently rendered frames per second.
     """
 
-    def __init__(self, space, pos=None, rotation=None):
+    def __init__(self, space, position=None, rotation=None):
         self.space = space
-        if pos is None:
+        if position is None:
             x, y, z = random()*12, random()*12, random()*9
             while not self.empty(x, y, z):
                 x, y, z = random()*12, random()*12, random()*9
             self.x, self.y, self.z = x, y, z
         else:
-            self.x, self.y, self.z = pos
+            self.x, self.y, self.z = position
 
         if rotation is None:
             self.rotation = BASE
@@ -72,14 +74,19 @@ class Picobot:
 
         self.fps = 60.0
 
+    def update(self, position, rotation):
+        """Update state."""
+        self.pos = position
+        self.rotation = rotation
+
     def empty(self, x, y, z) -> bool:
-        """Return weather a Picobot can be placed at (x, y, z)."""
-        if self.space[int((x-1/4) % 12)][int(y % 12)][int(z % 9)]: return False
-        if self.space[int((x+1/4) % 12)][int(y % 12)][int(z % 9)]: return False
-        if self.space[int(x % 12)][int((y-1/4) % 12)][int(z % 9)]: return False
-        if self.space[int(x % 12)][int((y+1/4) % 12)][int(z % 9)]: return False
-        if self.space[int(x % 12)][int(y % 12)][int((z-1/4) % 9)]: return False
-        if self.space[int(x % 12)][int(y % 12)][int((z+1/4) % 9)]: return False
+        """Return whether a Picobot can be placed at (x, y, z)."""
+        if self.space[int((x-RP) % 12)][int(y % 12)][int(z % 9)]: return False
+        if self.space[int((x+RP) % 12)][int(y % 12)][int(z % 9)]: return False
+        if self.space[int(x % 12)][int((y-RP) % 12)][int(z % 9)]: return False
+        if self.space[int(x % 12)][int((y+RP) % 12)][int(z % 9)]: return False
+        if self.space[int(x % 12)][int(y % 12)][int((z-RP) % 9)]: return False
+        if self.space[int(x % 12)][int(y % 12)][int((z+RP) % 9)]: return False
         return True
 
     def rotate(self, yaw, pitch):
@@ -96,6 +103,20 @@ class Picobot:
         if self.empty(x, self.y, self.z): self.x = x % 12
         if self.empty(self.x, y, self.z): self.y = y % 12
         if self.empty(self.x, self.y, z): self.z = z % 9
+
+    @property
+    def pos(self):
+        """Position in a NumPy array."""
+        return np.float32([self.x, self.y, self.z])
+
+    @pos.setter
+    def pos(self, position):
+        self.x, self.y, self.z = position
+
+    @property
+    def state(self):
+        """Position and rotation."""
+        return self.pos, self.rotation
 
     def look(self, window, xpos, ypos):
         """Look according to cursor position.

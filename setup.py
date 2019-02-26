@@ -28,5 +28,5 @@ setup(
     keywords='fps opengl glfw',
     packages=['axuy'],
     install_requires=['numpy', 'pyrr', 'moderngl', 'glfw'],
-    package_data={'axuy': ['map.npy', 'space.vert', 'space.frag']},
-    entry_points={'console_scripts': ['axuy = axuy.main:main']})
+    package_data={'axuy': ['map.npy', 'shaders']},
+    entry_points={'console_scripts': ['axuy = axuy.peer:main']})
