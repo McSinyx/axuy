@@ -16,7 +16,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
-from itertools import chain, combinations_with_replacement, permutations
+from itertools import (chain, combinations_with_replacement,
+                       permutations, product)
 from random import choices, shuffle
 
 import numpy
@@ -73,8 +74,34 @@ def neighbors(x, y, z):
     for i, j, k in NEIGHBORS: yield x + i*12, y + j*12, z + k*9
 
 
-def sign(x):
+def normalized(*vector):
+    """Return normalized vector as a NumPy array of float32."""
+    v = numpy.float32(vector)
+    if not any(v): return v
+    return v / sum(v**2)
+
+
+def sign(x) -> int:
     """Return the sign of number x."""
     if x > 0: return 1
     if x: return -1
     return 0
+
+
+def twelve(x) -> int:
+    """Shorthand for int(x % 12)."""
+    return int(x % 12)
+
+
+def nine(x) -> int:
+    """Shorthand for int(x % 9)."""
+    return int(x % 9)
+
+
+def placeable(space, x, y, z, r):
+    """Return whether a sphere of radius r
+    can be placed at (x, y, z) in given space."""
+    return not any(space[i][j][k] for i, j, k in product(
+        {twelve(x-r), twelve(x), twelve(x+r)},
+        {twelve(y-r), twelve(y), twelve(y+r)},
+        {nine(z-r), nine(z), nine(z+r)}))

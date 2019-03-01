@@ -24,8 +24,7 @@ from socket import socket, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR
 from threading import Thread
 
 from .misc import mapgen, mapidgen
-from .pico import Picobot
-from .view import View
+from .view import Pico, View
 
 
 class Peer:
@@ -47,8 +46,8 @@ class Peer:
             self.peers.extend(data['peers'])
 
         self.space = mapgen(mapid)
-        self.pico = Picobot(self.space, (0, 0, 0))
-        self.view = View(self.pico, args.width, args.height, self.space)
+        self.pico = Pico(self.space, (0, 0, 0))
+        self.view = View(self.pico, self.space, args.width, args.height)
 
         address = args.host, args.port
         data_server = Thread(target=self.serve,
@@ -69,15 +68,14 @@ class Peer:
 
     def serve(self, address, mapid):
         """Initiate peers."""
-        self.server = socket()  # TCP server
-        self.server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-        self.server.bind(address)
-        self.server.listen(7)
-        while self.view.is_running:
-            conn, addr = self.server.accept()
-            conn.send(dumps({'mapid': mapid, 'peers': self.peers}))
-            conn.close()
-        self.server.close()
+        with socket() as server:    # TCP server
+            server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+            server.bind(address)
+            server.listen(7)
+            while self.view.is_running:
+                conn, addr = server.accept()
+                conn.send(dumps({'mapid': mapid, 'peers': self.peers}))
+                conn.close()
 
     def push(self):
         """Send own state to peers."""
@@ -93,13 +91,12 @@ class Peer:
             try:
                 self.view.picos[addr].update(pos, rot)
             except KeyError:
-                self.view.picos[addr] = Picobot(self.space, pos, rot)
+                self.view.picos[addr] = Pico(self.space, pos, rot)
                 self.peers.append(addr)
 
     def __enter__(self): return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.server.close()
         self.sock.close()
         self.view.close()
 

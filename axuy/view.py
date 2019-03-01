@@ -20,17 +20,20 @@ __doc__ = 'Axuy module for map class'
 
 from itertools import product
 from math import sqrt
+from multiprocessing import Pool
 
 import glfw
 import moderngl
 import numpy as np
 from pyrr import Matrix44
 
+from .pico import INVZ, Picobot, Shard
 from .misc import abspath, color, neighbors, sign
 
 FOV_MIN = 30
 FOV_MAX = 120
 FOV_INIT = (FOV_MIN+FOV_MAX) / 2
+MOUSE_SPEED = 1/8
 
 OXY = np.float32([[0, 0, 0], [1, 0, 0], [1, 1, 0],
                   [1, 1, 0], [0, 1, 0], [0, 0, 0]])
@@ -54,30 +57,59 @@ with open(abspath('shaders/pico.vert')) as f: PICO_VERTEX = f.read()
 with open(abspath('shaders/pico.frag')) as f: PICO_FRAGMENT = f.read()
 
 
+class Pico(Picobot):
+    def look(self, window, xpos, ypos):
+        """Look according to cursor position.
+
+        Present as a callback for GLFW CursorPos event.
+        """
+        center = np.float32(glfw.get_window_size(window)) / 2
+        self.rotate(*((center - [xpos, ypos]) / self.fps * MOUSE_SPEED))
+
+
 class View:
     """World map and camera placement.
-    (Documentation below is not completed.)
 
     Parameters
     ----------
-    mapid : iterable of length 48 of ints
-        order of nodes to sort map.npy.
-    context : moderngl.Context
-        OpenGL context from which ModernGL objects are created.
+    camera : Pico
+        Protagonist whose view is the camera.
+    space : np.ndarray of shape (12, 12, 9) of bools
+        3D array of occupied space.
+    width, height : ints
+        Window size.
 
     Attributes
     ----------
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
+    camera : Pico
+        Protagonist whose view is the camera.
+    picos : dict of (str, Pico)
+        Enemies characters.
+    shards : list of Shards
+        Picobot fragments, which are capable of causing damage.
+    window : GLFW window
+    fov : int
+        horizontal field of view in degrees
+    context : moderngl.Context
+        OpenGL context from which ModernGL objects are created.
     maprog : moderngl.Program
-        Processed executable code in GLSL.
+        Processed executable code in GLSL for map rendering.
     mapva : moderngl.VertexArray
         Vertex data of the map.
-    camera : Picobot
-        Protagonist whose view is the camera.
+    prog : moderngl.Program
+        Processed executable code in GLSL
+        for rendering picobots and their shards.
+    pva : moderngl.VertexArray
+        Vertex data of picobots.
+    sva : moderngl.VertexArray
+        Vertex data of shards.
+    last_time : float
+        timestamp in seconds of the previous frame
     """
 
-    def __init__(self, pico, width, height, space):
+    def __init__(self, camera, space, width, height):
         # Create GLFW window
         if not glfw.init(): raise RuntimeError('Failed to initialize GLFW!')
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
@@ -87,11 +119,13 @@ class View:
         self.window = glfw.create_window(width, height, 'Axuy', None, None)
         if not self.window:
             glfw.terminate()
-            raise RuntimeError('Failed to create glfw window!')
+            raise RuntimeError('Failed to create GLFW window!')
 
-        self.camera = pico
-        self.picos = {'self': pico}
-        self.last_time = glfw.get_time()    # to keep track of FPS
+        self.camera = camera
+        self.picos = {'self': camera}
+        self.shards = []
+        self.last_time = glfw.get_time()
+        self.pool = Pool()
 
         # Window's rendering and event-handling configuration
         glfw.make_context_current(self.window)
@@ -101,6 +135,7 @@ class View:
         glfw.set_cursor_pos_callback(self.window, self.camera.look)
         self.fov = FOV_INIT
         glfw.set_scroll_callback(self.window, self.zoom)
+        glfw.set_mouse_button_callback(self.window, self.shoot)
 
         # Create OpenGL context
         self.context = context = moderngl.create_context()
@@ -128,14 +163,25 @@ class View:
         pvb = [(context.buffer(TETRAVERTICES.tobytes()), '3f', 'in_vert')]
         pib = context.buffer(TETRAINDECIES.tobytes())
         self.pva = context.vertex_array(self.prog, pvb, pib)
-
-        self.should_close = None
+        svb = [(context.buffer(OCTOVERTICES.tobytes()), '3f', 'in_vert')]
+        sib = context.buffer(OCTOINDECIES.tobytes())
+        self.sva = context.vertex_array(self.prog, svb, sib)
 
     def zoom(self, window, xoffset, yoffset):
         """Adjust FOV according to vertical scroll."""
         self.fov += yoffset
         if self.fov < FOV_MIN: self.fov = FOV_MIN
         if self.fov > FOV_MAX: self.fov = FOV_MAX
+
+    def shoot(self, window, button, action, mods):
+        """Shoot on click.
+
+        Present as a callback for GLFW MouseButton event.
+        """
+        protagonist = self.camera
+        if button == glfw.MOUSE_BUTTON_LEFT and action == glfw.PRESS:
+            self.shards.append(Shard(self.space, protagonist.pos,
+                                     protagonist.rot, protagonist.fps))
 
     @property
     def pos(self):
@@ -145,32 +191,47 @@ class View:
     @property
     def right(self):
         """Camera right direction."""
-        return self.camera.rotation[0]
+        return self.camera.rot[0]
 
     @property
     def upward(self):
         """Camera upward direction."""
-        return self.camera.rotation[1]
+        return self.camera.rot[1]
 
     @property
     def forward(self):
         """Camera forward direction."""
-        return self.camera.rotation[2]
+        return self.camera.rot[2]
 
     @property
-    def is_running(self):
+    def is_running(self) -> bool:
         """GLFW window status."""
         return not glfw.window_should_close(self.window)
 
-    def is_pressed(self, *keys):
+    @property
+    def visibility(self) -> np.float32:
+        """Camera visibility."""
+        return np.float32(sqrt(1800 / self.fov))
+
+    def update_fps(self, fps):
+        """Update camera's and shards' FPS
+        for their movement calculations.
+        """
+        self.camera.fps = fps
+        for shard in self.shards: shard.fps = fps
+        print(len(self.shards), fps)
+
+    def is_pressed(self, *keys) -> bool:
         """Return whether given keys are pressed."""
         return any(glfw.get_key(self.window, k) == glfw.PRESS for k in keys)
 
     def render(self, obj, va):
         """Render the obj and its images in bounded 3D space."""
-        rotation = Matrix44.from_matrix33(obj.rotation)
+        vsqr = self.visibility ** 2
+        rotation = Matrix44.from_matrix33(obj.rot)
         i, j, k = map(sign, self.pos - obj.pos)
         for position in product(*zip(obj.pos, obj.pos + [i*12, j*12, k*9])):
+            if sum((self.pos-position) ** 2) > vsqr: continue
             model = rotation @ Matrix44.from_translation(position)
             self.prog['model'].write(model.astype(np.float32).tobytes())
             self.prog['color'].write(color('Background').tobytes())
@@ -179,19 +240,20 @@ class View:
             va.render(moderngl.TRIANGLES)
 
     def render_pico(self, pico):
-        """Render the pico and its images in bounded 3D space."""
-        rotation = Matrix44.from_matrix33(pico.rotation)
-        i, j, k = map(sign, self.pos - pico.pos)
-        for position in product(*zip(pico.pos, pico.pos + [i*12, j*12, k*9])):
-            model = rotation @ Matrix44.from_translation(position)
-            self.prog['model'].write(model.astype(np.float32).tobytes())
-            self.prog['color'].write(color('Background').tobytes())
-            self.pva.render(moderngl.LINES)
-            self.prog['color'].write(color('Plum').tobytes())
-            self.pva.render(moderngl.TRIANGLES)
+        """Render pico and its images in bounded 3D space."""
+        self.render(pico, self.pva)
+
+    def render_shard(self, shard):
+        """Render shard and its images in bounded 3D space."""
+        self.render(shard, self.sva)
 
     def update(self):
         """Handle input, update GLSL programs and render the map."""
+        # Update instantaneous FPS
+        next_time = glfw.get_time()
+        self.update_fps(1 / (next_time-self.last_time))
+        self.last_time = next_time
+
         # Character movements
         right, upward, forward = 0, 0, 0
         if self.is_pressed(glfw.KEY_UP): forward += 1
@@ -205,22 +267,26 @@ class View:
         self.context.viewport = 0, 0, width, height
         self.context.clear(*color('Background'))
 
-        visibility = sqrt(1800 / self.fov)
+        visibility = self.visibility
         projection = Matrix44.perspective_projection(self.fov, width/height,
                                                      3E-3, visibility)
         view = Matrix44.look_at(self.pos, self.pos + self.forward, self.upward)
         vp = (view @ projection).astype(np.float32).tobytes()
 
-        self.maprog['visibility'].write(np.float32(visibility).tobytes())
+        self.maprog['visibility'].write(visibility.tobytes())
         self.maprog['camera'].write(self.pos.tobytes())
         self.maprog['mvp'].write(vp)
         self.mapva.render(moderngl.TRIANGLES)
 
-        self.prog['visibility'].write(np.float32(visibility).tobytes())
+        self.prog['visibility'].write(visibility.tobytes())
         self.prog['camera'].write(self.pos.tobytes())
         self.prog['vp'].write(vp)
         for pico in self.picos.copy().values():
             if pico is not self.camera: self.render_pico(pico)
+        self.shards = self.pool.map(Shard.update, self.shards)
+        for shard in self.shards:
+            #shard.update()
+            self.render_shard(shard)
         glfw.swap_buffers(self.window)
 
         # Resetting cursor position and event queues
@@ -230,3 +296,4 @@ class View:
     def close(self):
         """Close window."""
         glfw.terminate()
+        self.pool.terminate()
