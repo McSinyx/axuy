@@ -20,8 +20,9 @@ __doc__ = 'Axuy main loop'
 
 from argparse import ArgumentParser, RawTextHelpFormatter
 from pickle import dumps, loads
+from random import shuffle
 from socket import socket, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR
-from threading import Thread
+from threading import RLock, Thread, Semaphore
 
 from .misc import mapgen, mapidgen
 from .view import Pico, View
@@ -45,53 +46,60 @@ class Peer:
             mapid = data['mapid']
             self.peers.extend(data['peers'])
 
+        self.semaphore, lock = Semaphore(0), RLock()
+        self.addr = args.host, args.port
         self.space = mapgen(mapid)
-        self.pico = Pico(self.space, (0, 0, 0))
-        self.view = View(self.pico, self.space, args.width, args.height)
+        self.pico = Pico(self.addr, self.space, (0, 0, 0))
+        self.view = View(self.addr, self.pico, self.space,
+                         args.width, args.height, lock)
 
-        address = args.host, args.port
-        data_server = Thread(target=self.serve,
-                             args=(address, mapid))
+        data_server = Thread(target=self.serve, args=(mapid,))
         data_server.daemon = True
         data_server.start()
 
         self.sock = socket(type=SOCK_DGRAM)   # UDP
         self.sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-        self.sock.bind(address)
+        self.sock.bind(self.addr)
 
         pusher = Thread(target=self.push)
         pusher.daemon = True
         pusher.start()
-        puller = Thread(target=self.pull)
+        puller = Thread(target=self.pull, args=(lock,))
         puller.daemon = True
         puller.start()
 
-    def serve(self, address, mapid):
+    def serve(self, mapid):
         """Initiate peers."""
         with socket() as server:    # TCP server
             server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-            server.bind(address)
+            server.bind(self.addr)
             server.listen(7)
-            while self.view.is_running:
+            while True:
                 conn, addr = server.accept()
                 conn.send(dumps({'mapid': mapid, 'peers': self.peers}))
                 conn.close()
 
     def push(self):
         """Send own state to peers."""
-        while self.view.is_running:
-            for peer in self.peers: 
-                self.sock.sendto(dumps(self.view.camera.state), peer)
+        while True:
+            with self.semaphore:
+                shards = {i: (s.pos, s.rot, s.power)
+                          for i, s in self.pico.shards.items()}
+                data = dumps([self.pico.pos, self.pico.rot, shards])
+                shuffle(self.peers)
+                for peer in self.peers:
+                    self.semaphore.acquire()
+                    self.sock.sendto(data, peer)
 
-    def pull(self):
+    def pull(self, lock):
         """Receive peers' state."""
-        while self.view.is_running:
-            data, addr = self.sock.recvfrom(1024)
-            pos, rot = loads(data)
+        while True:
+            data, addr = self.sock.recvfrom(1<<16)
+            pos, rot, shards = loads(data)
             try:
-                self.view.picos[addr].update(pos, rot)
+                with lock: self.view.picos[addr].sync(pos, rot, shards)
             except KeyError:
-                self.view.picos[addr] = Pico(self.space, pos, rot)
+                with lock: self.view.add_pico(addr, pos, rot)
                 self.peers.append(addr)
 
     def __enter__(self): return self
@@ -111,4 +119,6 @@ def main():
     parser.add_argument('--width', type=int, help='window width')
     parser.add_argument('--height', type=int, help='window height')
     with Peer(parser.parse_args()) as peer:
-        while peer.view.is_running: peer.view.update()
+        while peer.view.is_running:
+            for _ in peer.peers: peer.semaphore.release()
+            peer.view.update()

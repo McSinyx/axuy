@@ -20,15 +20,15 @@ __doc__ = 'Axuy module for map class'
 
 from itertools import product
 from math import sqrt
-from multiprocessing import Pool
+from random import choice
 
 import glfw
 import moderngl
 import numpy as np
 from pyrr import Matrix44
 
-from .pico import INVZ, Picobot, Shard
-from .misc import abspath, color, neighbors, sign
+from .pico import Picobot
+from .misc import COLOR_NAMES, abspath, color, neighbors, sign
 
 FOV_MIN = 30
 FOV_MAX = 120
@@ -72,23 +72,31 @@ class View:
 
     Parameters
     ----------
+    address : (str, int)
+        IP address (host, port).
     camera : Pico
         Protagonist whose view is the camera.
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
     width, height : ints
         Window size.
+    lock : RLock
+        Compound data lock to avoid size change during iteration.
 
     Attributes
     ----------
+    addr : (str, int)
+        IP address (host, port).
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
     camera : Pico
         Protagonist whose view is the camera.
-    picos : dict of (str, Pico)
+    picos : dict of {address: Pico}
         Enemies characters.
-    shards : list of Shards
-        Picobot fragments, which are capable of causing damage.
+    colors : dict of {address: str}
+        Color names of enemies.
+    lock : RLock
+        Compound data lock to avoid size change during iteration.
     window : GLFW window
     fov : int
         horizontal field of view in degrees
@@ -106,10 +114,10 @@ class View:
     sva : moderngl.VertexArray
         Vertex data of shards.
     last_time : float
-        timestamp in seconds of the previous frame
+        timestamp in seconds of the previous frame.
     """
 
-    def __init__(self, camera, space, width, height):
+    def __init__(self, address, camera, space, width, height, lock):
         # Create GLFW window
         if not glfw.init(): raise RuntimeError('Failed to initialize GLFW!')
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
@@ -122,10 +130,10 @@ class View:
             raise RuntimeError('Failed to create GLFW window!')
 
         self.camera = camera
-        self.picos = {'self': camera}
-        self.shards = []
+        self.picos = {address: camera}
+        self.colors = {address: choice(COLOR_NAMES)}
         self.last_time = glfw.get_time()
-        self.pool = Pool()
+        self.lock = lock
 
         # Window's rendering and event-handling configuration
         glfw.make_context_current(self.window)
@@ -178,10 +186,8 @@ class View:
 
         Present as a callback for GLFW MouseButton event.
         """
-        protagonist = self.camera
         if button == glfw.MOUSE_BUTTON_LEFT and action == glfw.PRESS:
-            self.shards.append(Shard(self.space, protagonist.pos,
-                                     protagonist.rot, protagonist.fps))
+            self.camera.shoot()
 
     @property
     def pos(self):
@@ -213,19 +219,20 @@ class View:
         """Camera visibility."""
         return np.float32(sqrt(1800 / self.fov))
 
-    def update_fps(self, fps):
-        """Update camera's and shards' FPS
-        for their movement calculations.
-        """
+    @property
+    def fps(self):
+        """Currently rendered frames per second."""
+        return self.camera.fps
+
+    @fps.setter
+    def fps(self, fps):
         self.camera.fps = fps
-        for shard in self.shards: shard.fps = fps
-        print(len(self.shards), fps)
 
     def is_pressed(self, *keys) -> bool:
         """Return whether given keys are pressed."""
         return any(glfw.get_key(self.window, k) == glfw.PRESS for k in keys)
 
-    def render(self, obj, va):
+    def render(self, obj, va, col, bright=0):
         """Render the obj and its images in bounded 3D space."""
         vsqr = self.visibility ** 2
         rotation = Matrix44.from_matrix33(obj.rot)
@@ -236,22 +243,27 @@ class View:
             self.prog['model'].write(model.astype(np.float32).tobytes())
             self.prog['color'].write(color('Background').tobytes())
             va.render(moderngl.LINES)
-            self.prog['color'].write(color('Plum').tobytes())
+            self.prog['color'].write(color(col, bright).tobytes())
             va.render(moderngl.TRIANGLES)
 
     def render_pico(self, pico):
         """Render pico and its images in bounded 3D space."""
-        self.render(pico, self.pva)
+        self.render(pico, self.pva, self.colors[pico.addr])
 
     def render_shard(self, shard):
         """Render shard and its images in bounded 3D space."""
-        self.render(shard, self.sva)
+        self.render(shard, self.sva, self.colors[shard.addr], -shard.power)
+
+    def add_pico(self, address, position, rotation):
+        """Add picobot from addr at pos with rot."""
+        self.picos[address] = Pico(address, self.space, position, rotation)
+        self.colors[address] = choice(COLOR_NAMES)
 
     def update(self):
         """Handle input, update GLSL programs and render the map."""
         # Update instantaneous FPS
         next_time = glfw.get_time()
-        self.update_fps(1 / (next_time-self.last_time))
+        self.fps = 1 / (next_time-self.last_time)
         self.last_time = next_time
 
         # Character movements
@@ -281,12 +293,18 @@ class View:
         self.prog['visibility'].write(visibility.tobytes())
         self.prog['camera'].write(self.pos.tobytes())
         self.prog['vp'].write(vp)
-        for pico in self.picos.copy().values():
+
+        self.lock.acquire(blocking=False)
+        for pico in self.picos.values():
+            shards = {}
+            for index, shard in pico.shards.items():
+                if not shard.power: continue
+                shard.update(self.fps)
+                self.render_shard(shard)
+                shards[index] = shard
+            pico.shards = shards
             if pico is not self.camera: self.render_pico(pico)
-        self.shards = self.pool.map(Shard.update, self.shards)
-        for shard in self.shards:
-            #shard.update()
-            self.render_shard(shard)
+        self.lock.release()
         glfw.swap_buffers(self.window)
 
         # Resetting cursor position and event queues
@@ -296,4 +314,3 @@ class View:
     def close(self):
         """Close window."""
         glfw.terminate()
-        self.pool.terminate()
