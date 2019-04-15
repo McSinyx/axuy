@@ -31,7 +31,8 @@ TANGO = {'Butter': ('fce94f', 'edd400', 'c4a000'),
          'Plum': ('ad7fa8', '75507b', '5c3566'),
          'Scarlet Red': ('ef2929', 'cc0000', 'a40000'),
          'Aluminium': ('eeeeec', 'd3d7cf', 'babdb6',
-                       '888a85', '555753', '2e3436')}
+                       '888a85', '555753', '2e3436'),
+         'Background': ('000000',)}
 COLOR_NAMES = ['Butter', 'Orange', 'Chocolate', 'Chameleon',
                'Sky Blue', 'Plum', 'Scarlet Red']
 NEIGHBORS = set(chain.from_iterable(
@@ -47,8 +48,7 @@ def abspath(resource_name):
 
 def color(name, idx=0):
     """Return NumPy float32 array of RGB colors from color name."""
-    col = TANGO['Aluminium'][-1] if name == 'Background' else TANGO[name][idx]
-    return numpy.float32([i / 255 for i in bytes.fromhex(col)])
+    return numpy.float32([i / 255 for i in bytes.fromhex(TANGO[name][idx])])
 
 
 def mapidgen(replacement=False):

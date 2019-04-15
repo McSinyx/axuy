@@ -2,9 +2,9 @@
 
 uniform vec3 color;
 
-in float depth;
+in float intensity;
 out vec4 f_color;
 
 void main() {
-	f_color = vec4(color, 1 - depth);
+	f_color = vec4(color, intensity);
 }
