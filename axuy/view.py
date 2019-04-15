@@ -25,6 +25,7 @@ from random import choice
 import glfw
 import moderngl
 import numpy as np
+from PIL import Image
 from pyrr import Matrix44
 
 from .pico import Picobot
@@ -136,6 +137,7 @@ class View:
         self.lock = lock
 
         # Window's rendering and event-handling configuration
+        glfw.set_window_icon(self.window, 1, Image.open(abspath('icon.png')))
         glfw.make_context_current(self.window)
         glfw.swap_interval(1)
         glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
@@ -217,7 +219,7 @@ class View:
     @property
     def visibility(self) -> np.float32:
         """Camera visibility."""
-        return np.float32(sqrt(1800 / self.fov))
+        return np.float32(3240 / (self.fov + 240))
 
     @property
     def fps(self):
