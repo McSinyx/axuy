@@ -36,6 +36,7 @@ FOV_MAX = 120
 FOV_INIT = (FOV_MIN+FOV_MAX) / 2
 MOUSE_SPEED = 1/8
 
+QUAD = np.float32([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]).tobytes()
 OXY = np.float32([[0, 0, 0], [1, 0, 0], [1, 1, 0],
                   [1, 1, 0], [0, 1, 0], [0, 0, 0]])
 OYZ = np.float32([[0, 0, 0], [0, 1, 0], [0, 1, 1],
@@ -56,6 +57,13 @@ with open(abspath('shaders/map.vert')) as f: MAP_VERTEX = f.read()
 with open(abspath('shaders/map.frag')) as f: MAP_FRAGMENT = f.read()
 with open(abspath('shaders/pico.vert')) as f: PICO_VERTEX = f.read()
 with open(abspath('shaders/pico.frag')) as f: PICO_FRAGMENT = f.read()
+
+with open(abspath('shaders/tex.vert')) as f: TEX_VERTEX = f.read()
+with open(abspath('shaders/sat.frag')) as f: SAT_FRAGMENT = f.read()
+with open(abspath('shaders/gaussh.vert')) as f: GAUSSH_VERTEX = f.read()
+with open(abspath('shaders/gaussv.vert')) as f: GAUSSV_VERTEX = f.read()
+with open(abspath('shaders/gauss.frag')) as f: GAUSS_FRAGMENT = f.read()
+with open(abspath('shaders/comb.frag')) as f: COMBINE_FRAGMENT = f.read()
 
 
 class Pico(Picobot):
@@ -79,8 +87,6 @@ class View:
         Protagonist whose view is the camera.
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
-    width, height : ints
-        Window size.
     lock : RLock
         Compound data lock to avoid size change during iteration.
 
@@ -114,22 +120,36 @@ class View:
         Vertex data of picobots.
     sva : moderngl.VertexArray
         Vertex data of shards.
+    pfilter : moderngl.VertexArray
+        Vertex data for filtering highly saturated colors.
+    gaussh, gaussv : moderngl.Program
+        Processed executable code in GLSL for Gaussian blur.
+    gausshva, gaussvva : moderngl.VertexArray
+        Vertex data for Gaussian blur.
+    combine : moderngl.VertexArray
+        Vertex data for final combination of the bloom effect.
+    fb, ping, pong : moderngl.Framebuffer
+        Frame buffers for bloom-effect post-processing.
     last_time : float
         timestamp in seconds of the previous frame.
     """
 
     def __init__(self, address, camera, space, width, height, lock):
         # Create GLFW window
-        if not glfw.init(): raise RuntimeError('Failed to initialize GLFW!')
+        if not glfw.init(): raise RuntimeError('Failed to initialize GLFW')
+        glfw.window_hint(glfw.CLIENT_API, glfw.OPENGL_API)
+        glfw.window_hint(glfw.CONTEXT_CREATION_API, glfw.NATIVE_CONTEXT_API)
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True)
+        glfw.window_hint(glfw.DEPTH_BITS, 24)
         self.window = glfw.create_window(width, height, 'Axuy', None, None)
         if not self.window:
             glfw.terminate()
-            raise RuntimeError('Failed to create GLFW window!')
+            raise RuntimeError('Failed to create GLFW window')
 
+        # Attributes for event-handling
         self.camera = camera
         self.picos = {address: camera}
         self.colors = {address: choice(COLOR_NAMES)}
@@ -140,6 +160,7 @@ class View:
         glfw.set_window_icon(self.window, 1, Image.open(abspath('icon.png')))
         glfw.make_context_current(self.window)
         glfw.swap_interval(1)
+        glfw.set_window_size_callback(self.window, self.resize)
         glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
         glfw.set_input_mode(self.window, glfw.STICKY_KEYS, True)
         glfw.set_cursor_pos_callback(self.window, self.camera.look)
@@ -149,9 +170,9 @@ class View:
 
         # Create OpenGL context
         self.context = context = moderngl.create_context()
-        context.enable(moderngl.BLEND)
-        context.enable(moderngl.DEPTH_TEST)
+        context.enable_only(moderngl.BLEND | moderngl.DEPTH_TEST)
 
+        # Map creation
         self.space, vertices = space, []
         for (x, y, z), occupied in np.ndenumerate(self.space):
             if self.space[x][y][z-1] ^ occupied:
@@ -161,13 +182,14 @@ class View:
             if self.space[x][y-1][z] ^ occupied:
                 vertices.extend(i+j for i,j in product(neighbors(x,y,z), OZX))
 
+        # GLSL program and vertex array for map rendering
         self.maprog = context.program(vertex_shader=MAP_VERTEX,
                                       fragment_shader=MAP_FRAGMENT)
-        self.maprog['bg'].write(color('Background').tobytes())
         self.maprog['color'].write(color('Aluminium').tobytes())
         mapvb = context.buffer(np.stack(vertices).astype(np.float32).tobytes())
         self.mapva = context.simple_vertex_array(self.maprog, mapvb, 'in_vert')
 
+        # GLSL programs and vertex arrays for picos and shards rendering
         self.prog = context.program(vertex_shader=PICO_VERTEX,
                                     fragment_shader=PICO_FRAGMENT)
         pvb = [(context.buffer(TETRAVERTICES.tobytes()), '3f', 'in_vert')]
@@ -176,6 +198,52 @@ class View:
         svb = [(context.buffer(OCTOVERTICES.tobytes()), '3f', 'in_vert')]
         sib = context.buffer(OCTOINDECIES.tobytes())
         self.sva = context.vertex_array(self.prog, svb, sib)
+
+        self.pfilter = context.simple_vertex_array(
+            context.program(vertex_shader=TEX_VERTEX,
+                            fragment_shader=SAT_FRAGMENT),
+            context.buffer(QUAD), 'in_vert')
+        self.gaussh = context.program(vertex_shader=GAUSSH_VERTEX,
+                                      fragment_shader=GAUSS_FRAGMENT)
+        self.gaussh['width'].value = 256
+        self.gausshva = context.simple_vertex_array(
+            self.gaussh, context.buffer(QUAD), 'in_vert')
+        self.gaussv = context.program(vertex_shader=GAUSSV_VERTEX,
+                                      fragment_shader=GAUSS_FRAGMENT)
+        self.gaussv['height'].value = 256 * height / width
+        self.gaussvva = context.simple_vertex_array(
+            self.gaussv, context.buffer(QUAD), 'in_vert')
+        combine = context.program(vertex_shader=TEX_VERTEX,
+                                  fragment_shader=COMBINE_FRAGMENT)
+        combine['la'].value = 0
+        combine['tex'].value = 1
+        self.combine = context.simple_vertex_array(
+            combine, context.buffer(QUAD), 'in_vert')
+
+        size, table = (width, height), (256, height * 256 // width)
+        self.fb = context.framebuffer(context.texture(size, 4),
+                                      context.depth_renderbuffer(size))
+        self.fb.color_attachments[0].use(1)
+        self.ping = context.framebuffer(context.texture(table, 3))
+        self.pong = context.framebuffer(context.texture(table, 3))
+
+    def resize(self, window, width, height):
+        """Update viewport on resize."""
+        context = self.context
+        context.viewport = 0, 0, width, height
+        self.gaussv['height'].value = 256 * height / width
+
+        self.fb.depth_attachment.release()
+        for fb in (self.fb, self.ping, self.pong):
+            for texture in fb.color_attachments: texture.release()
+            fb.release()
+
+        size, table = (width, height), (256, height * 256 // width)
+        self.fb = context.framebuffer(context.texture(size, 4),
+                                      context.depth_renderbuffer(size))
+        self.fb.color_attachments[0].use(1)
+        self.ping = context.framebuffer(context.texture(table, 3))
+        self.pong = context.framebuffer(context.texture(table, 3))
 
     def zoom(self, window, xoffset, yoffset):
         """Adjust FOV according to vertical scroll."""
@@ -190,6 +258,16 @@ class View:
         """
         if button == glfw.MOUSE_BUTTON_LEFT and action == glfw.PRESS:
             self.camera.shoot()
+
+    @property
+    def width(self):
+        """Viewport width."""
+        return self.context.viewport[2]
+
+    @property
+    def height(self):
+        """Viewport height."""
+        return self.context.viewport[3]
 
     @property
     def pos(self):
@@ -234,7 +312,7 @@ class View:
         """Return whether given keys are pressed."""
         return any(glfw.get_key(self.window, k) == glfw.PRESS for k in keys)
 
-    def render(self, obj, va, col, bright=0):
+    def prender(self, obj, va, col, bright=0):
         """Render the obj and its images in bounded 3D space."""
         vsqr = self.visibility ** 2
         rotation = Matrix44.from_matrix33(obj.rot)
@@ -243,23 +321,55 @@ class View:
             if sum((self.pos-position) ** 2) > vsqr: continue
             model = rotation @ Matrix44.from_translation(position)
             self.prog['model'].write(model.astype(np.float32).tobytes())
-            self.prog['color'].write(color('Background').tobytes())
+            self.prog['color'].write(color('Aluminium', -1).tobytes())
+            self.prog['color'].write(color(col, -1).tobytes())
             va.render(moderngl.LINES)
             self.prog['color'].write(color(col, bright).tobytes())
             va.render(moderngl.TRIANGLES)
 
     def render_pico(self, pico):
         """Render pico and its images in bounded 3D space."""
-        self.render(pico, self.pva, self.colors[pico.addr])
+        self.prender(pico, self.pva, self.colors[pico.addr])
 
     def render_shard(self, shard):
         """Render shard and its images in bounded 3D space."""
-        self.render(shard, self.sva, self.colors[shard.addr], -shard.power)
+        self.prender(shard, self.sva, self.colors[shard.addr], -shard.power)
 
     def add_pico(self, address, position, rotation):
         """Add picobot from addr at pos with rot."""
         self.picos[address] = Pico(address, self.space, position, rotation)
         self.colors[address] = choice(COLOR_NAMES)
+
+    def render(self):
+        """Render the scene before post-processing."""
+        visibility = self.visibility
+        projection = Matrix44.perspective_projection(
+            self.fov, self.width/self.height, 3E-3, visibility)
+        view = Matrix44.look_at(self.pos, self.pos + self.forward, self.upward)
+        vp = (view @ projection).astype(np.float32).tobytes()
+
+        # Render map
+        self.maprog['visibility'].write(visibility.tobytes())
+        self.maprog['camera'].write(self.pos.tobytes())
+        self.maprog['mvp'].write(vp)
+        self.mapva.render(moderngl.TRIANGLES)
+
+        # Render picos and shards
+        self.prog['visibility'].write(visibility.tobytes())
+        self.prog['camera'].write(self.pos.tobytes())
+        self.prog['vp'].write(vp)
+
+        self.lock.acquire(blocking=False)
+        for pico in self.picos.values():
+            shards = {}
+            for index, shard in pico.shards.items():
+                if not shard.power: continue
+                shard.update(self.fps)
+                self.render_shard(shard)
+                shards[index] = shard
+            pico.shards = shards
+            if pico is not self.camera: self.render_pico(pico)
+        self.lock.release()
 
     def update(self):
         """Handle input, update GLSL programs and render the map."""
@@ -276,41 +386,31 @@ class View:
         if self.is_pressed(glfw.KEY_RIGHT): right += 1
         self.camera.move(right, upward, forward)
 
-        # Renderings
-        width, height = glfw.get_window_size(self.window)
-        self.context.viewport = 0, 0, width, height
-        self.context.clear(*color('Background'))
+        self.fb.use()
+        self.fb.clear()
+        self.render()
+        self.fb.color_attachments[0].use()
+        self.ping.use()
+        self.ping.clear()
+        self.pfilter.render(moderngl.TRIANGLES)
+        self.ping.color_attachments[0].use()
 
-        visibility = self.visibility
-        projection = Matrix44.perspective_projection(self.fov, width/height,
-                                                     3E-3, visibility)
-        view = Matrix44.look_at(self.pos, self.pos + self.forward, self.upward)
-        vp = (view @ projection).astype(np.float32).tobytes()
+        self.pong.use()
+        self.pong.clear()
+        self.gausshva.render(moderngl.TRIANGLES)
+        self.pong.color_attachments[0].use()
+        self.ping.use()
+        self.ping.clear()
+        self.gaussvva.render(moderngl.TRIANGLES)
+        self.ping.color_attachments[0].use()
 
-        self.maprog['visibility'].write(visibility.tobytes())
-        self.maprog['camera'].write(self.pos.tobytes())
-        self.maprog['mvp'].write(vp)
-        self.mapva.render(moderngl.TRIANGLES)
-
-        self.prog['visibility'].write(visibility.tobytes())
-        self.prog['camera'].write(self.pos.tobytes())
-        self.prog['vp'].write(vp)
-
-        self.lock.acquire(blocking=False)
-        for pico in self.picos.values():
-            shards = {}
-            for index, shard in pico.shards.items():
-                if not shard.power: continue
-                shard.update(self.fps)
-                self.render_shard(shard)
-                shards[index] = shard
-            pico.shards = shards
-            if pico is not self.camera: self.render_pico(pico)
-        self.lock.release()
+        self.context.screen.use()
+        self.context.clear()
+        self.combine.render(moderngl.TRIANGLES)
         glfw.swap_buffers(self.window)
 
         # Resetting cursor position and event queues
-        glfw.set_cursor_pos(self.window, width/2, height/2)
+        glfw.set_cursor_pos(self.window, self.width/2, self.height/2)
         glfw.poll_events()
 
     def close(self):

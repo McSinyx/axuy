@@ -31,8 +31,7 @@ TANGO = {'Butter': ('fce94f', 'edd400', 'c4a000'),
          'Plum': ('ad7fa8', '75507b', '5c3566'),
          'Scarlet Red': ('ef2929', 'cc0000', 'a40000'),
          'Aluminium': ('eeeeec', 'd3d7cf', 'babdb6',
-                       '888a85', '555753', '2e3436'),
-         'Background': ('000000',)}
+                       '888a85', '555753', '2e3436')}
 COLOR_NAMES = ['Butter', 'Orange', 'Chocolate', 'Chameleon',
                'Sky Blue', 'Plum', 'Scarlet Red']
 NEIGHBORS = set(chain.from_iterable(
