@@ -34,6 +34,7 @@ from .misc import COLOR_NAMES, abspath, color, neighbors, sign
 FOV_MIN = 30
 FOV_MAX = 120
 FOV_INIT = (FOV_MIN+FOV_MAX) / 2
+CONWAY = 1.303577269034
 MOUSE_SPEED = 1/8
 
 QUAD = np.float32([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]).tobytes()
@@ -126,6 +127,9 @@ class View:
         Processed executable code in GLSL for Gaussian blur.
     gausshva, gaussvva : moderngl.VertexArray
         Vertex data for Gaussian blur.
+    fringe : moderngl.Program
+        Processed executable code in GLSL for final combination
+        of the bloom effect with additional chromatic aberration.
     combine : moderngl.VertexArray
         Vertex data for final combination of the bloom effect.
     fb, ping, pong : moderngl.Framebuffer
@@ -213,12 +217,12 @@ class View:
         self.gaussv['height'].value = 256 * height / width
         self.gaussvva = context.simple_vertex_array(
             self.gaussv, context.buffer(QUAD), 'in_vert')
-        combine = context.program(vertex_shader=TEX_VERTEX,
-                                  fragment_shader=COMBINE_FRAGMENT)
-        combine['la'].value = 0
-        combine['tex'].value = 1
+        self.fringe = context.program(vertex_shader=TEX_VERTEX,
+                                      fragment_shader=COMBINE_FRAGMENT)
+        self.fringe['la'].value = 0
+        self.fringe['tex'].value = 1
         self.combine = context.simple_vertex_array(
-            combine, context.buffer(QUAD), 'in_vert')
+            self.fringe, context.buffer(QUAD), 'in_vert')
 
         size, table = (width, height), (256, height * 256 // width)
         self.fb = context.framebuffer(context.texture(size, 4),
@@ -349,13 +353,13 @@ class View:
         vp = (view @ projection).astype(np.float32).tobytes()
 
         # Render map
-        self.maprog['visibility'].write(visibility.tobytes())
+        self.maprog['visibility'].value = visibility
         self.maprog['camera'].write(self.pos.tobytes())
         self.maprog['mvp'].write(vp)
         self.mapva.render(moderngl.TRIANGLES)
 
         # Render picos and shards
-        self.prog['visibility'].write(visibility.tobytes())
+        self.prog['visibility'].value = visibility
         self.prog['camera'].write(self.pos.tobytes())
         self.prog['vp'].write(vp)
 
@@ -406,6 +410,7 @@ class View:
 
         self.context.screen.use()
         self.context.clear()
+        self.fringe['invfov'].value = 1.0 / self.fov**CONWAY
         self.combine.render(moderngl.TRIANGLES)
         glfw.swap_buffers(self.window)
 
