@@ -20,7 +20,7 @@ __doc__ = 'Axuy module for map class'
 
 from itertools import product
 from math import sqrt
-from random import choice
+from random import randint
 
 import glfw
 import moderngl
@@ -28,14 +28,15 @@ import numpy as np
 from PIL import Image
 from pyrr import Matrix44
 
-from .pico import Picobot
-from .misc import COLOR_NAMES, abspath, color, neighbors, sign
+from .pico import SHARD_LIFE, Picobot
+from .misc import abspath, color, neighbors, sign
 
 FOV_MIN = 30
 FOV_MAX = 120
-FOV_INIT = (FOV_MIN+FOV_MAX) / 2
+FOV_INIT = (FOV_MIN+FOV_MAX) // 2
 CONWAY = 1.303577269034
 MOUSE_SPEED = 1/8
+EDGE_BRIGHTNESS = 0.5
 
 QUAD = np.float32([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]).tobytes()
 OXY = np.float32([[0, 0, 0], [1, 0, 0], [1, 1, 0],
@@ -55,9 +56,10 @@ OCTOINDECIES = np.int32([0, 1, 2, 0, 1, 4, 3, 0, 2, 3, 0, 4,
                          2, 1, 5, 4, 1, 5, 2, 5, 3, 4, 5, 3])
 
 with open(abspath('shaders/map.vert')) as f: MAP_VERTEX = f.read()
-with open(abspath('shaders/map.frag')) as f: MAP_FRAGMENT = f.read()
+with open(abspath('shaders/world.frag')) as f: WORLD_FRAGMENT = f.read()
 with open(abspath('shaders/pico.vert')) as f: PICO_VERTEX = f.read()
-with open(abspath('shaders/pico.frag')) as f: PICO_FRAGMENT = f.read()
+with open(abspath('shaders/line.geom')) as f: LINE_GEOMETRY = f.read()
+with open(abspath('shaders/triangle.geom')) as f: TRIANGLE_GEOMETRY = f.read()
 
 with open(abspath('shaders/tex.vert')) as f: TEX_VERTEX = f.read()
 with open(abspath('shaders/sat.frag')) as f: SAT_FRAGMENT = f.read()
@@ -114,12 +116,12 @@ class View:
         Processed executable code in GLSL for map rendering.
     mapva : moderngl.VertexArray
         Vertex data of the map.
-    prog : moderngl.Program
+    prog2, prog3 : moderngl.Program
         Processed executable code in GLSL
         for rendering picobots and their shards.
-    pva : moderngl.VertexArray
+    pva2, pva3 : moderngl.VertexArray
         Vertex data of picobots.
-    sva : moderngl.VertexArray
+    sva2, sva3 : moderngl.VertexArray
         Vertex data of shards.
     pfilter : moderngl.VertexArray
         Vertex data for filtering highly saturated colors.
@@ -156,7 +158,7 @@ class View:
         # Attributes for event-handling
         self.camera = camera
         self.picos = {address: camera}
-        self.colors = {address: choice(COLOR_NAMES)}
+        self.colors = {address: randint(0, 5)}
         self.last_time = glfw.get_time()
         self.lock = lock
 
@@ -174,7 +176,7 @@ class View:
 
         # Create OpenGL context
         self.context = context = moderngl.create_context()
-        context.enable_only(moderngl.BLEND | moderngl.DEPTH_TEST)
+        context.enable_only(moderngl.DEPTH_TEST)
 
         # Map creation
         self.space, vertices = space, []
@@ -188,20 +190,27 @@ class View:
 
         # GLSL program and vertex array for map rendering
         self.maprog = context.program(vertex_shader=MAP_VERTEX,
-                                      fragment_shader=MAP_FRAGMENT)
-        self.maprog['color'].write(color('Aluminium').tobytes())
+                                      fragment_shader=WORLD_FRAGMENT)
+        self.maprog['color'].write(bytes((0, 0, 128, 63) * 3))
         mapvb = context.buffer(np.stack(vertices).astype(np.float32).tobytes())
         self.mapva = context.simple_vertex_array(self.maprog, mapvb, 'in_vert')
 
         # GLSL programs and vertex arrays for picos and shards rendering
-        self.prog = context.program(vertex_shader=PICO_VERTEX,
-                                    fragment_shader=PICO_FRAGMENT)
         pvb = [(context.buffer(TETRAVERTICES.tobytes()), '3f', 'in_vert')]
         pib = context.buffer(TETRAINDECIES.tobytes())
-        self.pva = context.vertex_array(self.prog, pvb, pib)
         svb = [(context.buffer(OCTOVERTICES.tobytes()), '3f', 'in_vert')]
         sib = context.buffer(OCTOINDECIES.tobytes())
-        self.sva = context.vertex_array(self.prog, svb, sib)
+
+        self.prog2 = context.program(vertex_shader=PICO_VERTEX,
+                                     geometry_shader=LINE_GEOMETRY,
+                                     fragment_shader=WORLD_FRAGMENT)
+        self.pva2 = context.vertex_array(self.prog2, pvb, pib)
+        self.sva2 = context.vertex_array(self.prog2, svb, sib)
+        self.prog3 = context.program(vertex_shader=PICO_VERTEX,
+                                     geometry_shader=TRIANGLE_GEOMETRY,
+                                     fragment_shader=WORLD_FRAGMENT)
+        self.pva3 = context.vertex_array(self.prog3, pvb, pib)
+        self.sva3 = context.vertex_array(self.prog3, svb, sib)
 
         self.pfilter = context.simple_vertex_array(
             context.program(vertex_shader=TEX_VERTEX,
@@ -311,38 +320,38 @@ class View:
     @fps.setter
     def fps(self, fps):
         self.camera.fps = fps
+        #print(fps)
 
     def is_pressed(self, *keys) -> bool:
         """Return whether given keys are pressed."""
         return any(glfw.get_key(self.window, k) == glfw.PRESS for k in keys)
 
-    def prender(self, obj, va, col, bright=0):
+    def prender(self, obj, va2, va3, col, bright=1.0):
         """Render the obj and its images in bounded 3D space."""
-        vsqr = self.visibility ** 2
-        rotation = Matrix44.from_matrix33(obj.rot)
-        i, j, k = map(sign, self.pos - obj.pos)
-        for position in product(*zip(obj.pos, obj.pos + [i*12, j*12, k*9])):
-            if sum((self.pos-position) ** 2) > vsqr: continue
-            model = rotation @ Matrix44.from_translation(position)
-            self.prog['model'].write(model.astype(np.float32).tobytes())
-            self.prog['color'].write(color('Aluminium', -1).tobytes())
-            self.prog['color'].write(color(col, -1).tobytes())
-            va.render(moderngl.LINES)
-            self.prog['color'].write(color(col, bright).tobytes())
-            va.render(moderngl.TRIANGLES)
+        rotation = Matrix44.from_matrix33(obj.rot).astype(np.float32).tobytes()
+        position = obj.pos.astype(np.float32).tobytes()
+        self.prog2['rot'].write(rotation)
+        self.prog3['rot'].write(rotation)
+        self.prog2['pos'].write(position)
+        self.prog3['pos'].write(position)
+        self.prog2['color'].write(color(col, bright*EDGE_BRIGHTNESS).tobytes())
+        self.prog3['color'].write(color(col, bright).tobytes())
+        va2.render(moderngl.LINES)
+        va3.render(moderngl.TRIANGLES)
 
     def render_pico(self, pico):
         """Render pico and its images in bounded 3D space."""
-        self.prender(pico, self.pva, self.colors[pico.addr])
+        self.prender(pico, self.pva2, self.pva3, self.colors[pico.addr])
 
     def render_shard(self, shard):
         """Render shard and its images in bounded 3D space."""
-        self.prender(shard, self.sva, self.colors[shard.addr], -shard.power)
+        self.prender(shard, self.sva2, self.sva3,
+                     self.colors[shard.addr], shard.power/SHARD_LIFE)
 
     def add_pico(self, address, position, rotation):
         """Add picobot from addr at pos with rot."""
         self.picos[address] = Pico(address, self.space, position, rotation)
-        self.colors[address] = choice(COLOR_NAMES)
+        self.colors[address] = randint(0, 5)
 
     def render(self):
         """Render the scene before post-processing."""
@@ -359,9 +368,12 @@ class View:
         self.mapva.render(moderngl.TRIANGLES)
 
         # Render picos and shards
-        self.prog['visibility'].value = visibility
-        self.prog['camera'].write(self.pos.tobytes())
-        self.prog['vp'].write(vp)
+        self.prog2['visibility'].value = visibility
+        self.prog3['visibility'].value = visibility
+        self.prog2['camera'].write(self.pos.tobytes())
+        self.prog3['camera'].write(self.pos.tobytes())
+        self.prog2['vp'].write(vp)
+        self.prog3['vp'].write(vp)
 
         self.lock.acquire(blocking=False)
         for pico in self.picos.values():

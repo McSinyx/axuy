@@ -16,7 +16,7 @@ vec2 fringe(vec2 vert, float delta)
 void main(void)
 {
 	vec2 vert = in_text * 2.0 - 1.0;
-	f_color = texture(la, in_text) * 0.42 + vec4(
+	f_color = texture(la, in_text) + vec4(
 		texture(tex, fringe(vert, -invfov)).r,
 		texture(tex, fringe(vert, invfov)).g,
 		texture(tex, in_text).b, 1.0);
