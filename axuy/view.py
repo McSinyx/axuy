@@ -29,7 +29,7 @@ from PIL import Image
 from pyrr import Matrix44
 
 from .pico import SHARD_LIFE, Picobot
-from .misc import abspath, color, neighbors, sign
+from .misc import abspath, color, neighbors
 
 FOV_MIN = 30
 FOV_MAX = 120
@@ -56,10 +56,10 @@ OCTOINDECIES = np.int32([0, 1, 2, 0, 1, 4, 3, 0, 2, 3, 0, 4,
                          2, 1, 5, 4, 1, 5, 2, 5, 3, 4, 5, 3])
 
 with open(abspath('shaders/map.vert')) as f: MAP_VERTEX = f.read()
-with open(abspath('shaders/world.frag')) as f: WORLD_FRAGMENT = f.read()
 with open(abspath('shaders/pico.vert')) as f: PICO_VERTEX = f.read()
 with open(abspath('shaders/line.geom')) as f: LINE_GEOMETRY = f.read()
 with open(abspath('shaders/triangle.geom')) as f: TRIANGLE_GEOMETRY = f.read()
+with open(abspath('shaders/world.frag')) as f: WORLD_FRAGMENT = f.read()
 
 with open(abspath('shaders/tex.vert')) as f: TEX_VERTEX = f.read()
 with open(abspath('shaders/sat.frag')) as f: SAT_FRAGMENT = f.read()
@@ -75,7 +75,8 @@ class Pico(Picobot):
 
         Present as a callback for GLFW CursorPos event.
         """
-        center = np.float32(glfw.get_window_size(window)) / 2
+        center = np.array(glfw.get_window_size(window)) / 2
+        glfw.set_cursor_pos(window, *center)
         self.rotate(*((center - [xpos, ypos]) / self.fps * MOUSE_SPEED))
 
 
@@ -168,6 +169,8 @@ class View:
         glfw.swap_interval(1)
         glfw.set_window_size_callback(self.window, self.resize)
         glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
+        if glfw.raw_mouse_motion_supported():
+            glfw.set_input_mode(self.window, glfw.RAW_MOUSE_MOTION, True)
         glfw.set_input_mode(self.window, glfw.STICKY_KEYS, True)
         glfw.set_cursor_pos_callback(self.window, self.camera.look)
         self.fov = FOV_INIT
@@ -425,9 +428,6 @@ class View:
         self.fringe['invfov'].value = 1.0 / self.fov**CONWAY
         self.combine.render(moderngl.TRIANGLES)
         glfw.swap_buffers(self.window)
-
-        # Resetting cursor position and event queues
-        glfw.set_cursor_pos(self.window, self.width/2, self.height/2)
         glfw.poll_events()
 
     def close(self):

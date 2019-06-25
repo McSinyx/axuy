@@ -27,6 +27,6 @@ setup(
         'Topic :: Games/Entertainment :: First Person Shooters'],
     keywords='fps p2p opengl glfw',
     packages=['axuy'],
-    install_requires=['numpy', 'pyrr', 'moderngl', 'glfw', 'Pillow'],
-    package_data={'axuy': ['map.npy', 'shaders/*']},
+    install_requires=['numpy', 'pyrr', 'moderngl', 'glfw>=1.8', 'Pillow'],
+    package_data={'axuy': ['map.npy', 'shaders/*', 'icon.png']},
     entry_points={'console_scripts': ['axuy = axuy.peer:main']})
