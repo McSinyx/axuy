@@ -16,6 +16,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
+__version__ = '0.0.1'
 __doc__ = 'Axuy main loop'
 
 from argparse import ArgumentParser, RawTextHelpFormatter
@@ -25,7 +26,7 @@ from socket import socket, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR
 from threading import RLock, Thread, Semaphore
 
 from .misc import mapgen, mapidgen
-from .view import Pico, View
+from .view import ConfigReader, Pico, View
 
 
 class Peer:
@@ -33,13 +34,13 @@ class Peer:
     TODO: Documentation
     """
 
-    def __init__(self, args):
-        if args.seeder is None:
+    def __init__(self, config):
+        if config.seeder is None:
             mapid = mapidgen()
             self.peers = []
         else:
             client = socket()
-            host, port = args.seeder.split(':')
+            host, port = config.seeder.split(':')
             self.peers = [(host, int(port))]
             client.connect(*self.peers)
             data = loads(client.recv(1024))
@@ -47,11 +48,12 @@ class Peer:
             self.peers.extend(data['peers'])
 
         self.semaphore, lock = Semaphore(0), RLock()
-        self.addr = args.host, args.port
+        self.addr = config.host, config.port
         self.space = mapgen(mapid)
         self.pico = Pico(self.addr, self.space, (0, 0, 0))
         self.view = View(self.addr, self.pico, self.space,
-                         args.width, args.height, lock)
+                         config.size, config.vsync,
+                         {'key': config.key, 'mouse': config.mouse}, lock)
 
         data_server = Thread(target=self.serve, args=(mapid,))
         data_server.daemon = True
@@ -110,15 +112,37 @@ class Peer:
 
 
 def main():
-    """Parse command-line arguments and start main loop."""
+    """Parse arguments and start main loop."""
+    # Read configuration files
+    config = ConfigReader()
+    config.parse()
+
+    # Parse command-line arguments
     parser = ArgumentParser(usage='%(prog)s [options]',
                             formatter_class=RawTextHelpFormatter)
-    parser.add_argument('--seeder')
-    parser.add_argument('--host')
-    parser.add_argument('--port', type=int)
-    parser.add_argument('--width', type=int, help='window width')
-    parser.add_argument('--height', type=int, help='window height')
-    with Peer(parser.parse_args()) as peer:
+    parser.add_argument('-v', '--version', action='version',
+                        version='Axuy {}'.format(__version__))
+    parser.add_argument(
+        '--host',
+        help='host to bind this peer to (fallback: {})'.format(config.host))
+    parser.add_argument(
+        '--port', type=int,
+        help='port to bind this peer to (fallback: {})'.format(config.port))
+    parser.add_argument('--seeder',
+                        help='address of the peer that created the map')
+    parser.add_argument(
+        '-s', '--size', type=int, nargs=2, metavar=('X', 'Y'),
+        help='the desired screen size (fallback: {}x{})'.format(*config.size))
+    parser.add_argument(
+        '--vsync', action='store_true', default=None,
+        help='enable vertical synchronization (fallback: {})'.format(
+            config.vsync))
+    parser.add_argument('--no-vsync', action='store_false', dest='server',
+                        help='disable vertical synchronization')
+    args = parser.parse_args()
+    config.read_args(args)
+
+    with Peer(config) as peer:
         while peer.view.is_running:
             for _ in peer.peers: peer.semaphore.release()
             peer.view.update()

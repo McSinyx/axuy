@@ -18,25 +18,35 @@
 
 __doc__ = 'Axuy module for map class'
 
+from configparser import ConfigParser
 from itertools import product
+from os.path import join as pathjoin, pathsep
 from math import sqrt
 from random import randint
+from warnings import warn
 
 import glfw
 import moderngl
 import numpy as np
+from appdirs import AppDirs
 from PIL import Image
 from pyrr import Matrix44
 
 from .pico import SHARD_LIFE, Picobot
 from .misc import abspath, color, neighbors
 
+CONTROL_ALIASES = (('Move left', 'left'), ('Move right', 'right'),
+                   ('Move forward', 'forward'), ('Move backward', 'backward'),
+                   ('Primary', '1st'))
+MOUSE_PATTERN = 'MOUSE_BUTTON_[1-{}]'.format(glfw.MOUSE_BUTTON_LAST + 1)
+INVALID_CONTROL_ERR = '{}: {} is not recognized as a valid control key'
+
 FOV_MIN = 30
 FOV_MAX = 120
 FOV_INIT = (FOV_MIN+FOV_MAX) // 2
 CONWAY = 1.303577269034
 MOUSE_SPEED = 1/8
-EDGE_BRIGHTNESS = 0.5
+EDGE_BRIGHTNESS = 1/3
 
 QUAD = np.float32([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]).tobytes()
 OXY = np.float32([[0, 0, 0], [1, 0, 0], [1, 1, 0],
@@ -69,6 +79,67 @@ with open(abspath('shaders/gauss.frag')) as f: GAUSS_FRAGMENT = f.read()
 with open(abspath('shaders/comb.frag')) as f: COMBINE_FRAGMENT = f.read()
 
 
+class ConfigReader:
+    """Object reading and processing command-line arguments
+    and INI configuration file for Axuy.
+
+    Attributes
+    ----------
+    config : ConfigParser
+        INI configuration file parser.
+    host : str
+        Host to bind the peer to.
+    port : int
+        Port to bind the peer to.
+    seeder : str
+        Address of the peer that created the map.
+    size : (int, int)
+        GLFW window resolution.
+    vsync : bool
+        Vertical synchronization.
+    key, mouse : dict of (str, int)
+        Input control.
+    """
+
+    def __init__(self):
+        dirs = AppDirs(appname='axuy', appauthor=False, multipath=True)
+        parents = dirs.site_config_dir.split(pathsep)
+        parents.append(dirs.user_config_dir)
+        filenames = [pathjoin(parent, 'settings.ini') for parent in parents]
+
+        self.config = ConfigParser()
+        self.config.read(abspath('settings.ini'))    # default configuration
+        self.config.read(filenames)
+
+    # Fallback to None when attribute is missing
+    def __getattr__(self, name): return None
+
+    def parse(self):
+        """Parse configurations."""
+        self.size = (self.config.getint('Graphics', 'Screen width'),
+                     self.config.getint('Graphics', 'Screen height'))
+        self.vsync = self.config.getboolean('Graphics', 'V-sync')
+        self.host = self.config.get('Peer', 'Host')
+        self.port = self.config.getint('Peer', 'Port')
+
+        self.key, self.mouse = {}, {}
+        for cmd, alias in CONTROL_ALIASES:
+            i = self.config.get('Control', cmd)
+            try:
+                self.mouse[alias] = getattr(glfw, i.upper())
+            except AttributeError:
+                try:
+                    self.key[alias] = getattr(glfw, 'KEY_{}'.format(i.upper()))
+                except AttributeError:
+                    raise ValueError(INVALID_CONTROL_ERR.format(cmd, i))
+
+    def read_args(self, arguments):
+        """Read and parse a argparse.ArgumentParser.Namespace."""
+        for option in ('size', 'vsync', 'host', 'port', 'seeder'):
+            value = getattr(arguments, option)
+            if value is not None: setattr(self, option, value)
+
+
 class Pico(Picobot):
     def look(self, window, xpos, ypos):
         """Look according to cursor position.
@@ -91,6 +162,12 @@ class View:
         Protagonist whose view is the camera.
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
+    size : (int, int)
+        GLFW window resolution.
+    vsync : bool
+        Vertical synchronization.
+    ctl : dict of (str, int)
+        Input control.
     lock : RLock
         Compound data lock to avoid size change during iteration.
 
@@ -141,7 +218,7 @@ class View:
         timestamp in seconds of the previous frame.
     """
 
-    def __init__(self, address, camera, space, width, height, lock):
+    def __init__(self, address, camera, space, size, vsync, ctl, lock):
         # Create GLFW window
         if not glfw.init(): raise RuntimeError('Failed to initialize GLFW')
         glfw.window_hint(glfw.CLIENT_API, glfw.OPENGL_API)
@@ -151,10 +228,12 @@ class View:
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True)
         glfw.window_hint(glfw.DEPTH_BITS, 24)
+        width, height = size
         self.window = glfw.create_window(width, height, 'Axuy', None, None)
         if not self.window:
             glfw.terminate()
             raise RuntimeError('Failed to create GLFW window')
+        self.key, self.mouse = ctl['key'], ctl['mouse']
 
         # Attributes for event-handling
         self.camera = camera
@@ -166,16 +245,22 @@ class View:
         # Window's rendering and event-handling configuration
         glfw.set_window_icon(self.window, 1, Image.open(abspath('icon.png')))
         glfw.make_context_current(self.window)
-        glfw.swap_interval(1)
+        glfw.swap_interval(vsync)
         glfw.set_window_size_callback(self.window, self.resize)
         glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
-        if glfw.raw_mouse_motion_supported():
-            glfw.set_input_mode(self.window, glfw.RAW_MOUSE_MOTION, True)
         glfw.set_input_mode(self.window, glfw.STICKY_KEYS, True)
         glfw.set_cursor_pos_callback(self.window, self.camera.look)
         self.fov = FOV_INIT
         glfw.set_scroll_callback(self.window, self.zoom)
         glfw.set_mouse_button_callback(self.window, self.shoot)
+
+        try:
+            if glfw.raw_mouse_motion_supported():
+                glfw.set_input_mode(self.window, glfw.RAW_MOUSE_MOTION, True)
+        except AttributeError:
+            warn('Your GLFW version appear to be lower than 3.3, '
+                 'which might cause stuttering camera rotation.',
+                 category=RuntimeWarning)
 
         # Create OpenGL context
         self.context = context = moderngl.create_context()
@@ -272,36 +357,36 @@ class View:
 
         Present as a callback for GLFW MouseButton event.
         """
-        if button == glfw.MOUSE_BUTTON_LEFT and action == glfw.PRESS:
+        if button == self.mouse['1st'] and action == glfw.PRESS:
             self.camera.shoot()
 
     @property
-    def width(self):
+    def width(self) -> int:
         """Viewport width."""
         return self.context.viewport[2]
 
     @property
-    def height(self):
+    def height(self) -> int:
         """Viewport height."""
         return self.context.viewport[3]
 
     @property
-    def pos(self):
+    def pos(self) -> np.float32:
         """Camera position in a NumPy array."""
         return self.camera.pos
 
     @property
-    def right(self):
+    def right(self) -> np.float32:
         """Camera right direction."""
         return self.camera.rot[0]
 
     @property
-    def upward(self):
+    def upward(self) -> np.float32:
         """Camera upward direction."""
         return self.camera.rot[1]
 
     @property
-    def forward(self):
+    def forward(self) -> np.float32:
         """Camera forward direction."""
         return self.camera.rot[2]
 
@@ -316,7 +401,7 @@ class View:
         return np.float32(3240 / (self.fov + 240))
 
     @property
-    def fps(self):
+    def fps(self) -> float:
         """Currently rendered frames per second."""
         return self.camera.fps
 
@@ -399,10 +484,10 @@ class View:
 
         # Character movements
         right, upward, forward = 0, 0, 0
-        if self.is_pressed(glfw.KEY_UP): forward += 1
-        if self.is_pressed(glfw.KEY_DOWN): forward -= 1
-        if self.is_pressed(glfw.KEY_LEFT): right -= 1
-        if self.is_pressed(glfw.KEY_RIGHT): right += 1
+        if self.is_pressed(self.key['forward']): forward += 1
+        if self.is_pressed(self.key['backward']): forward -= 1
+        if self.is_pressed(self.key['left']): right -= 1
+        if self.is_pressed(self.key['right']): right += 1
         self.camera.move(right, upward, forward)
 
         self.fb.use()
