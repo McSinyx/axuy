@@ -21,8 +21,9 @@ __doc__ = 'Axuy module for map class'
 from configparser import ConfigParser
 from itertools import product
 from os.path import join as pathjoin, pathsep
-from math import sqrt
+from math import degrees, log2, radians, sqrt
 from random import randint
+from re import IGNORECASE, match
 from warnings import warn
 
 import glfw
@@ -40,12 +41,11 @@ CONTROL_ALIASES = (('Move left', 'left'), ('Move right', 'right'),
                    ('Primary', '1st'))
 MOUSE_PATTERN = 'MOUSE_BUTTON_[1-{}]'.format(glfw.MOUSE_BUTTON_LAST + 1)
 INVALID_CONTROL_ERR = '{}: {} is not recognized as a valid control key'
+GLFW_VER_WARN = 'Your GLFW version appear to be lower than 3.3, '\
+                'which might cause stuttering camera rotation.'
 
-FOV_MIN = 30
-FOV_MAX = 120
-FOV_INIT = (FOV_MIN+FOV_MAX) // 2
+ZMIN, ZMAX = -1.0, 1.0
 CONWAY = 1.303577269034
-MOUSE_SPEED = 1/8
 EDGE_BRIGHTNESS = 1/3
 
 QUAD = np.float32([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]).tobytes()
@@ -97,8 +97,14 @@ class ConfigReader:
         GLFW window resolution.
     vsync : bool
         Vertical synchronization.
+    zmlvl : float
+        Zoom level.
     key, mouse : dict of (str, int)
         Input control.
+    mouspeed : float
+        Relative camera rotational speed.
+    zmspeed : float
+        Zoom speed, in scroll steps per zoom range.
     """
 
     def __init__(self):
@@ -114,41 +120,63 @@ class ConfigReader:
     # Fallback to None when attribute is missing
     def __getattr__(self, name): return None
 
+    @property
+    def fov(self) -> float:
+        """Horizontal field of view in degrees."""
+        if self.zmlvl is None: return None
+        return degrees(2 ** self.zmlvl)
+
+    @fov.setter
+    def fov(self, value):
+        rad = radians(value)
+        if rad < 0.5:
+            warn('Too narrow FOV, falling back to the minimal value.')
+            self.zmlvl = -1.0
+            return
+        elif rad > 2:
+            warn('Too wide FOVm falling back to the maximal value.')
+            self.zmlvl = 1.0
+            return
+        self.zmlvl = log2(rad)
+
+    @property
+    def mouspeed(self) -> float:
+        """Relative mouse speed."""
+        # Standard to radians per inch for a 800 DPI mouse, at FOV of 60
+        return self._mouspeed / 800
+
+    @mouspeed.setter
+    def mouspeed(self, value):
+        self._mouspeed = value
+
     def parse(self):
         """Parse configurations."""
         self.size = (self.config.getint('Graphics', 'Screen width'),
                      self.config.getint('Graphics', 'Screen height'))
         self.vsync = self.config.getboolean('Graphics', 'V-sync')
+        self.fov = self.config.getfloat('Graphics', 'FOV')
         self.host = self.config.get('Peer', 'Host')
         self.port = self.config.getint('Peer', 'Port')
+        self.mouspeed = self.config.getfloat('Control', 'Mouse speed')
+        self.zmspeed = self.config.getfloat('Control', 'Zoom speed')
 
         self.key, self.mouse = {}, {}
         for cmd, alias in CONTROL_ALIASES:
             i = self.config.get('Control', cmd)
-            try:
+            if match(MOUSE_PATTERN, i, flags=IGNORECASE):
                 self.mouse[alias] = getattr(glfw, i.upper())
+                continue
+            try:
+                self.key[alias] = getattr(glfw, 'KEY_{}'.format(i.upper()))
             except AttributeError:
-                try:
-                    self.key[alias] = getattr(glfw, 'KEY_{}'.format(i.upper()))
-                except AttributeError:
-                    raise ValueError(INVALID_CONTROL_ERR.format(cmd, i))
+                raise ValueError(INVALID_CONTROL_ERR.format(cmd, i))
 
     def read_args(self, arguments):
         """Read and parse a argparse.ArgumentParser.Namespace."""
-        for option in ('size', 'vsync', 'host', 'port', 'seeder'):
+        for option in ('size', 'vsync', 'fov', 'mouspeed', 'zmspeed',
+                       'host', 'port', 'seeder'):
             value = getattr(arguments, option)
             if value is not None: setattr(self, option, value)
-
-
-class Pico(Picobot):
-    def look(self, window, xpos, ypos):
-        """Look according to cursor position.
-
-        Present as a callback for GLFW CursorPos event.
-        """
-        center = np.array(glfw.get_window_size(window)) / 2
-        glfw.set_cursor_pos(window, *center)
-        self.rotate(*((center - [xpos, ypos]) / self.fps * MOUSE_SPEED))
 
 
 class View:
@@ -158,7 +186,7 @@ class View:
     ----------
     address : (str, int)
         IP address (host, port).
-    camera : Pico
+    camera : Picobot
         Protagonist whose view is the camera.
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
@@ -177,17 +205,21 @@ class View:
         IP address (host, port).
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
-    camera : Pico
+    camera : Picobot
         Protagonist whose view is the camera.
-    picos : dict of {address: Pico}
+    picos : dict of (address, Picobot)
         Enemies characters.
-    colors : dict of {address: str}
+    colors : dict of (address, str)
         Color names of enemies.
     lock : RLock
         Compound data lock to avoid size change during iteration.
     window : GLFW window
-    fov : int
-        horizontal field of view in degrees
+    zmlvl : float
+        Zoom level (from ZMIN to ZMAX).
+    zmspeed : float
+        Scroll steps per zoom range.
+    mouspeed : float
+        Relative camera rotational speed.
     context : moderngl.Context
         OpenGL context from which ModernGL objects are created.
     maprog : moderngl.Program
@@ -218,7 +250,7 @@ class View:
         timestamp in seconds of the previous frame.
     """
 
-    def __init__(self, address, camera, space, size, vsync, ctl, lock):
+    def __init__(self, address, camera, space, config, lock):
         # Create GLFW window
         if not glfw.init(): raise RuntimeError('Failed to initialize GLFW')
         glfw.window_hint(glfw.CLIENT_API, glfw.OPENGL_API)
@@ -228,12 +260,12 @@ class View:
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True)
         glfw.window_hint(glfw.DEPTH_BITS, 24)
-        width, height = size
+        width, height = config.size
         self.window = glfw.create_window(width, height, 'Axuy', None, None)
         if not self.window:
             glfw.terminate()
             raise RuntimeError('Failed to create GLFW window')
-        self.key, self.mouse = ctl['key'], ctl['mouse']
+        self.key, self.mouse = config.key, config.mouse
 
         # Attributes for event-handling
         self.camera = camera
@@ -245,12 +277,13 @@ class View:
         # Window's rendering and event-handling configuration
         glfw.set_window_icon(self.window, 1, Image.open(abspath('icon.png')))
         glfw.make_context_current(self.window)
-        glfw.swap_interval(vsync)
+        glfw.swap_interval(config.vsync)
         glfw.set_window_size_callback(self.window, self.resize)
         glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
         glfw.set_input_mode(self.window, glfw.STICKY_KEYS, True)
-        glfw.set_cursor_pos_callback(self.window, self.camera.look)
-        self.fov = FOV_INIT
+        self.mouspeed = config.mouspeed
+        glfw.set_cursor_pos_callback(self.window, self.look)
+        self.zmspeed, self.zmlvl = config.zmspeed, config.zmlvl
         glfw.set_scroll_callback(self.window, self.zoom)
         glfw.set_mouse_button_callback(self.window, self.shoot)
 
@@ -258,9 +291,7 @@ class View:
             if glfw.raw_mouse_motion_supported():
                 glfw.set_input_mode(self.window, glfw.RAW_MOUSE_MOTION, True)
         except AttributeError:
-            warn('Your GLFW version appear to be lower than 3.3, '
-                 'which might cause stuttering camera rotation.',
-                 category=RuntimeWarning)
+            warn(GLFW_VER_WARN, category=RuntimeWarning)
 
         # Create OpenGL context
         self.context = context = moderngl.create_context()
@@ -346,11 +377,20 @@ class View:
         self.ping = context.framebuffer(context.texture(table, 3))
         self.pong = context.framebuffer(context.texture(table, 3))
 
+    def look(self, window, xpos, ypos):
+        """Look according to cursor position.
+
+        Present as a callback for GLFW CursorPos event.
+        """
+        center = np.array(glfw.get_window_size(window)) / 2
+        glfw.set_cursor_pos(window, *center)
+        self.camera.rotate(*((center - [xpos, ypos]) * self.rotspeed))
+
     def zoom(self, window, xoffset, yoffset):
         """Adjust FOV according to vertical scroll."""
-        self.fov += yoffset
-        if self.fov < FOV_MIN: self.fov = FOV_MIN
-        if self.fov > FOV_MAX: self.fov = FOV_MAX
+        self.zmlvl += yoffset * 2 / self.zmspeed
+        self.zmlvl = max(self.zmlvl, ZMIN)
+        self.zmlvl = min(self.zmlvl, ZMAX)
 
     def shoot(self, window, button, action, mods):
         """Shoot on click.
@@ -396,6 +436,16 @@ class View:
         return not glfw.window_should_close(self.window)
 
     @property
+    def fov(self) -> float:
+        """Horizontal field of view in degrees."""
+        return degrees(2 ** self.zmlvl)
+
+    @property
+    def rotspeed(self) -> float:
+        """Camera rotational speed, calculated from FOV and mouse speed."""
+        return 2**self.zmlvl * self.mouspeed
+
+    @property
     def visibility(self) -> np.float32:
         """Camera visibility."""
         return np.float32(3240 / (self.fov + 240))
@@ -438,7 +488,7 @@ class View:
 
     def add_pico(self, address, position, rotation):
         """Add picobot from addr at pos with rot."""
-        self.picos[address] = Pico(address, self.space, position, rotation)
+        self.picos[address] = Picobot(address, self.space, position, rotation)
         self.colors[address] = randint(0, 5)
 
     def render(self):

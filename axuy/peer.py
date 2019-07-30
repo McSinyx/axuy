@@ -16,7 +16,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 __doc__ = 'Axuy main loop'
 
 from argparse import ArgumentParser, RawTextHelpFormatter
@@ -26,7 +26,8 @@ from socket import socket, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR
 from threading import RLock, Thread, Semaphore
 
 from .misc import mapgen, mapidgen
-from .view import ConfigReader, Pico, View
+from .pico import Picobot
+from .view import ConfigReader, View
 
 
 class Peer:
@@ -50,10 +51,8 @@ class Peer:
         self.semaphore, lock = Semaphore(0), RLock()
         self.addr = config.host, config.port
         self.space = mapgen(mapid)
-        self.pico = Pico(self.addr, self.space, (0, 0, 0))
-        self.view = View(self.addr, self.pico, self.space,
-                         config.size, config.vsync,
-                         {'key': config.key, 'mouse': config.mouse}, lock)
+        self.pico = Picobot(self.addr, self.space)
+        self.view = View(self.addr, self.pico, self.space, config, lock)
 
         data_server = Thread(target=self.serve, args=(mapid,))
         data_server.daemon = True
@@ -76,6 +75,7 @@ class Peer:
             server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
             server.bind(self.addr)
             server.listen(7)
+            print('Axuy is listening at {}:{}'.format(*server.getsockname()))
             while True:
                 conn, addr = server.accept()
                 conn.send(dumps({'mapid': mapid, 'peers': self.peers}))
@@ -130,6 +130,7 @@ def main():
         help='port to bind this peer to (fallback: {})'.format(config.port))
     parser.add_argument('--seeder',
                         help='address of the peer that created the map')
+    # All these options specific for a graphical peer need to be modularized.
     parser.add_argument(
         '-s', '--size', type=int, nargs=2, metavar=('X', 'Y'),
         help='the desired screen size (fallback: {}x{})'.format(*config.size))
@@ -139,6 +140,16 @@ def main():
             config.vsync))
     parser.add_argument('--no-vsync', action='store_false', dest='server',
                         help='disable vertical synchronization')
+    parser.add_argument(
+        '--fov', type=float,
+        help='horizontal field of view (fallback: {:.1f})'.format(config.fov))
+    parser.add_argument(
+        '--mouse-speed', type=float, dest='mouspeed',
+        help='camera rotational speed (fallback: {:.1f})'.format(
+            config._mouspeed))
+    parser.add_argument(
+        '--zoom-speed', type=float, dest='zmspeed',
+        help='zoom speed (fallback: {:.1f})'.format(config.zmspeed))
     args = parser.parse_args()
     config.read_args(args)
 
