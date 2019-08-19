@@ -513,17 +513,16 @@ class View:
         self.prog2['vp'].write(vp)
         self.prog3['vp'].write(vp)
 
-        self.lock.acquire(blocking=False)
-        for pico in self.picos.values():
-            shards = {}
-            for index, shard in pico.shards.items():
-                if not shard.power: continue
-                shard.update(self.fps)
-                self.render_shard(shard)
-                shards[index] = shard
-            pico.shards = shards
-            if pico is not self.camera: self.render_pico(pico)
-        self.lock.release()
+        with self.lock:
+            for pico in self.picos.values():
+                shards = {}
+                for index, shard in pico.shards.items():
+                    if not shard.power: continue
+                    shard.update(self.fps)
+                    self.render_shard(shard)
+                    shards[index] = shard
+                pico.shards = shards
+                if pico is not self.camera: self.render_pico(pico)
 
     def update(self):
         """Handle input, update GLSL programs and render the map."""

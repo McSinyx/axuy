@@ -97,3 +97,10 @@ def placeable(space, x, y, z, r):
         {twelve(x-r), twelve(x), twelve(x+r)},
         {twelve(y-r), twelve(y), twelve(y+r)},
         {nine(z-r), nine(z), nine(z+r)}))
+
+
+def whilst(func, cond=lambda:True):
+    """Call func until cond is broken."""
+    def loop(*args, **kwargs):
+        while cond(): func(*args, **kwargs)
+    return loop
