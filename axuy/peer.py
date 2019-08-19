@@ -16,7 +16,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
-__version__ = '0.0.2'
+__version__ = '0.0.3'
 __doc__ = 'Axuy main loop'
 
 from argparse import ArgumentParser, RawTextHelpFormatter

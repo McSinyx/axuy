@@ -560,6 +560,7 @@ class View:
         self.context.screen.use()
         self.context.clear()
         self.fringe['invfov'].value = 1.0 / self.fov**CONWAY
+        self.fringe['zoom'].value = (self.zmlvl + 1.0) / 100
         self.combine.render(moderngl.TRIANGLES)
         glfw.swap_buffers(self.window)
         glfw.poll_events()

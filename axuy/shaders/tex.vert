@@ -1,7 +1,5 @@
 #version 330
 
-uniform float width;
-
 in vec2 in_vert;
 out vec2 in_text;
 
