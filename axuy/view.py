@@ -18,12 +18,15 @@
 
 __doc__ = 'Axuy module for map class'
 
+from collections import deque
 from configparser import ConfigParser
 from itertools import product
 from os.path import join as pathjoin, pathsep
 from math import degrees, log2, radians, sqrt
 from random import randint
 from re import IGNORECASE, match
+from statistics import mean
+from typing import Tuple
 from warnings import warn
 
 import glfw
@@ -46,7 +49,7 @@ GLFW_VER_WARN = 'Your GLFW version appear to be lower than 3.3, '\
 
 ZMIN, ZMAX = -1.0, 1.0
 CONWAY = 1.303577269034
-EDGE_BRIGHTNESS = 1/3
+EDGE_BRIGHTNESS = 1/6
 
 QUAD = np.float32([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]).tobytes()
 OXY = np.float32([[0, 0, 0], [1, 0, 0], [1, 1, 0],
@@ -121,6 +124,16 @@ class ConfigReader:
     def __getattr__(self, name): return None
 
     @property
+    def seeder(self) -> Tuple[str, int]:
+        """Seeder address."""
+        return self._seed
+
+    @seeder.setter
+    def seeder(self, value):
+        host, port = value.split(':')
+        self._seed = host, int(port)
+
+    @property
     def fov(self) -> float:
         """Horizontal field of view in degrees."""
         if self.zmlvl is None: return None
@@ -134,7 +147,7 @@ class ConfigReader:
             self.zmlvl = -1.0
             return
         elif rad > 2:
-            warn('Too wide FOVm falling back to the maximal value.')
+            warn('Too wide FOV, falling back to the maximal value.')
             self.zmlvl = 1.0
             return
         self.zmlvl = log2(rad)
@@ -241,13 +254,16 @@ class View:
         Vertex data for Gaussian blur.
     fringe : moderngl.Program
         Processed executable code in GLSL for final combination
-        of the bloom effect with additional chromatic aberration.
+        of the bloom effect with additional chromatic aberration
+        and barrel distortion.
     combine : moderngl.VertexArray
         Vertex data for final combination of the bloom effect.
     fb, ping, pong : moderngl.Framebuffer
         Frame buffers for bloom-effect post-processing.
     last_time : float
         timestamp in seconds of the previous frame.
+    fpses : deque of floats
+        FPS during the last 5 seconds to display the average.
     """
 
     def __init__(self, address, camera, space, config, lock):
@@ -259,15 +275,17 @@ class View:
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True)
-        glfw.window_hint(glfw.DEPTH_BITS, 24)
         width, height = config.size
-        self.window = glfw.create_window(width, height, 'Axuy', None, None)
+        self.window = glfw.create_window(
+            width, height, 'axuy@{}:{}'.format(*address), None, None)
         if not self.window:
             glfw.terminate()
             raise RuntimeError('Failed to create GLFW window')
         self.key, self.mouse = config.key, config.mouse
+        self.fpses = deque()
 
         # Attributes for event-handling
+        self.addr = address
         self.camera = camera
         self.picos = {address: camera}
         self.colors = {address: randint(0, 5)}
@@ -416,6 +434,11 @@ class View:
         return self.camera.pos
 
     @property
+    def postr(self) -> str:
+        """Pretty camera position representation."""
+        return '[{:4.1f} {:4.1f} {:3.1f}]'.format(*self.camera.pos)
+
+    @property
     def right(self) -> np.float32:
         """Camera right direction."""
         return self.camera.rot[0]
@@ -458,7 +481,14 @@ class View:
     @fps.setter
     def fps(self, fps):
         self.camera.fps = fps
-        #print(fps)
+        self.fpses.appendleft(fps)
+
+    @property
+    def fpstr(self) -> str:
+        """Pretty string for displaying average FPS."""
+        # Average over 5 seconds, like how glxgears do it, but less efficient
+        while len(self.fpses) > mean(self.fpses) * 5 > 0: self.fpses.pop()
+        return '{} fps'.format(round(mean(self.fpses)))
 
     def is_pressed(self, *keys) -> bool:
         """Return whether given keys are pressed."""
@@ -538,6 +568,8 @@ class View:
         if self.is_pressed(self.key['left']): right -= 1
         if self.is_pressed(self.key['right']): right += 1
         self.camera.move(right, upward, forward)
+        glfw.set_window_title(self.window, '{} - axuy@{}:{} ({})'.format(
+                self.postr, *self.addr, self.fpstr))
 
         self.fb.use()
         self.fb.clear()

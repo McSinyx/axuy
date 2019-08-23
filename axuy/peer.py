@@ -35,30 +35,24 @@ class Peer:
     """
 
     def __init__(self, config):
+        self.sock = socket(type=SOCK_DGRAM)     # UDP
+        self.sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        self.sock.bind((config.host, config.port))
+        self.addr = self.sock.getsockname()
+        self.updated, lock = Event(), RLock()
+
         if config.seeder is None:
-            mapid = mapidgen()
-            self.peers = []
+            mapid, self.peers = mapidgen(), []
         else:
             client = socket()
-            host, port = config.seeder.split(':')
-            self.peers = [(host, int(port))]
-            client.connect(*self.peers)
-            data = loads(client.recv(1024))
-            mapid = data['mapid']
-            self.peers.extend(data['peers'])
+            client.connect(config.seeder)
+            mapid, self.peers = loads(client.recv(1024))
 
-        self.updated, lock = Event(), RLock()
-        self.addr = config.host, config.port
         self.space = mapgen(mapid)
         self.pico = Picobot(self.addr, self.space)
         self.view = View(self.addr, self.pico, self.space, config, lock)
 
         Thread(target=self.serve, args=(mapid,), daemon=True).start()
-
-        self.sock = socket(type=SOCK_DGRAM)   # UDP
-        self.sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-        self.sock.bind(self.addr)
-
         Thread(target=self.push, daemon=True).start()
         Thread(target=self.pull, args=(lock,), daemon=True).start()
 
@@ -68,10 +62,10 @@ class Peer:
             server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
             server.bind(self.addr)
             server.listen(7)
-            print('Axuy is listening at {}:{}'.format(*server.getsockname()))
+            print('Axuy is listening at {}:{}'.format(*self.addr))
             while True:
                 conn, addr = server.accept()
-                conn.send(dumps({'mapid': mapid, 'peers': self.peers}))
+                conn.send(dumps((mapid, self.peers+[self.addr])))
                 conn.close()
 
     @whilst
