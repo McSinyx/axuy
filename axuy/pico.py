@@ -30,9 +30,8 @@ INVX = np.float32([[-1, 0, 0], [0, 1, 0], [0, 0, 1]])
 INVY = np.float32([[1, 0, 0], [0, -1, 0], [0, 0, 1]])
 INVZ = np.float32([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
 
-# Magic numbers. Do not try to figure out what they mean.
-PICO_SPEED = (1+sqrt(5)) / 2            # in unit/s
-SHARD_SPEED = PICO_SPEED * 243**0.25    # in unit/s
+PICO_SPEED = 1 + sqrt(5)        # in unit/s
+SHARD_SPEED = PICO_SPEED * 2    # in unit/s
 SHARD_LIFE = 3  # bounces
 
 
@@ -211,5 +210,6 @@ class Picobot:
         if self.placeable(z=z): self.z = z % 9
 
     def shoot(self):
+        self.move(forward=-1)
         self.shards[max(self.shards, default=0) + 1] = Shard(
             self.addr, self.space, self.pos, self.rot)

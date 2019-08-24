@@ -70,7 +70,7 @@ def normalized(*vector):
     """Return normalized vector as a NumPy array of float32."""
     v = numpy.float32(vector)
     if not any(v): return v
-    return v / sum(v**2)
+    return v / numpy.sqrt(numpy.sum(v**2))
 
 
 def sign(x) -> int:

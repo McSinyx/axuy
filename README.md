@@ -13,5 +13,5 @@ The game is still under development. For testing, first install GLFW version 3.3
 $ git clone https://github.com/McSinyx/axuy.git
 $ pip3 install --user --editable axuy
 $ axuy --port=42069 &
-$ axuy --seeder=localhost:42069
+$ axuy --seeder=:42069
 ```
