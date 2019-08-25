@@ -66,11 +66,16 @@ def neighbors(x, y, z):
     for i, j, k in NEIGHBORS: yield x + i*12, y + j*12, z + k*9
 
 
+def norm(vector):
+    """Return the norm of the given vector."""
+    return numpy.sqrt(numpy.sum(vector**2))
+
+
 def normalized(*vector):
     """Return normalized vector as a NumPy array of float32."""
     v = numpy.float32(vector)
-    if not any(v): return v
-    return v / numpy.sqrt(numpy.sum(v**2))
+    if not v.any(): return v
+    return v / norm(v)
 
 
 def sign(x) -> int:

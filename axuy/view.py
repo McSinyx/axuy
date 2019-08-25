@@ -20,9 +20,9 @@ __doc__ = 'Axuy module for map class'
 
 from collections import deque
 from configparser import ConfigParser
-from itertools import combinations, product
+from itertools import product
 from os.path import join as pathjoin, pathsep
-from math import degrees, log2, radians, sqrt
+from math import degrees, log2, radians
 from random import randint
 from re import IGNORECASE, match
 from statistics import mean
@@ -36,7 +36,7 @@ from appdirs import AppDirs
 from PIL import Image
 from pyrr import Matrix44
 
-from .pico import SHARD_LIFE, Picobot
+from .pico import TETRAVERTICES, OCTOVERTICES, SHARD_LIFE, Picobot
 from .misc import abspath, color, neighbors
 
 CONTROL_ALIASES = (('Move left', 'left'), ('Move right', 'right'),
@@ -58,12 +58,7 @@ OYZ = np.float32([[0, 0, 0], [0, 1, 0], [0, 1, 1],
 OZX = np.float32([[0, 0, 0], [1, 0, 0], [1, 0, 1],
                   [1, 0, 1], [0, 0, 1], [0, 0, 0]])
 
-TETRAVERTICES = np.float32([[0, sqrt(8), -1], [sqrt(6), -sqrt(2), -1],
-                            [0, 0, 3], [-sqrt(6), -sqrt(2), -1]]) / 18
 TETRAINDECIES = np.int32([0, 1, 2, 3, 1, 2, 0, 3, 2, 0, 3, 1])
-
-OCTOVERTICES = np.float32([(a + b) / 2
-                           for a, b in combinations(TETRAVERTICES, 2)])
 OCTOINDECIES = np.int32([0, 1, 2, 0, 1, 3, 4, 0, 2, 4, 0, 3,
                          2, 1, 5, 3, 1, 5, 2, 5, 4, 3, 5, 4])
 

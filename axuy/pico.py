@@ -18,13 +18,21 @@
 
 __doc__ = 'Axuy module for character class'
 
+from itertools import combinations
 from math import pi, sqrt
 from random import random
 
 import numpy as np
 from pyrr import matrix33
 
-from .misc import normalized, placeable
+from .misc import norm, normalized, placeable
+
+TETRAVERTICES = np.float32([[0, sqrt(8), -1], [sqrt(6), -sqrt(2), -1],
+                            [0, 0, 3], [-sqrt(6), -sqrt(2), -1]]) / 18
+OCTOVERTICES = np.float32([(a + b) / 2.0
+                           for a, b in combinations(TETRAVERTICES, 2)])
+RPICO = norm(TETRAVERTICES[0])
+RSHARD = norm(OCTOVERTICES[0])
 
 INVX = np.float32([[-1, 0, 0], [0, 1, 0], [0, 0, 1]])
 INVY = np.float32([[1, 0, 0], [0, -1, 0], [0, 0, 1]])
@@ -33,11 +41,12 @@ INVZ = np.float32([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
 PICO_SPEED = 1 + sqrt(5)        # in unit/s
 SHARD_SPEED = PICO_SPEED * 2    # in unit/s
 SHARD_LIFE = 3  # bounces
+RPS = 6     # rounds per second
 
 
 class Shard:
     """Fragment broken or shot out of a Picobot, which is a regular
-    octahedron whose circumscribed sphere's radius is 1/12 unit.
+    octahedron whose circumscribed sphere's radius is RSHARD.
 
     Parameters
     ----------
@@ -94,7 +103,7 @@ class Shard:
         if x is None: x = self.x
         if y is None: y = self.y
         if z is None: z = self.z
-        return not placeable(self.space, x, y, z, r=1/12)
+        return not placeable(self.space, x, y, z, r=RSHARD)
 
     def update(self, fps):
         """Update states."""
@@ -119,7 +128,7 @@ class Shard:
 
 class Picobot:
     """Game character, which is represented as a regular tetrahedron
-    whose circumscribed sphere's radius is 1/4 unit.
+    whose circumscribed sphere's radius is RPICO.
 
     Parameters
     ----------
@@ -144,6 +153,10 @@ class Picobot:
         Rotational matrix.
     shards : dict of Shard
         Active shards.
+    recoil_u : np.ndarray of length 3 of np.float32
+        Recoil direction (unit vector).
+    recoil_t : float
+        Recoil time left in seconds.
     fps : float
         Currently rendered frames per second.
     """
@@ -166,6 +179,7 @@ class Picobot:
             self.rot = rotation
 
         self.shards = {}
+        self.recoil_u, self.recoil_t = np.float32([0, 0, 0]), 0.0
         self.fps = 60.0
 
     @property
@@ -192,7 +206,7 @@ class Picobot:
         if x is None: x = self.x
         if y is None: y = self.y
         if z is None: z = self.z
-        return placeable(self.space, x, y, z, 1/4)
+        return placeable(self.space, x, y, z, RPICO)
 
     def rotate(self, yaw, pitch):
         """Rotate yaw radians around y-axis
@@ -202,14 +216,25 @@ class Picobot:
                     @ matrix33.create_from_y_rotation(yaw) @ self.rot)
 
     def move(self, right=0, upward=0, forward=0):
-        """Try to move in the given direction."""
+        """Try to move in the given direction.
+
+        This is the equivalence of Shard.update
+        and should be called every loop.
+        """
+        dt = 1.0 / self.fps
         direction = normalized(right, upward, forward) @ self.rot
-        x, y, z = self.pos + direction/self.fps*PICO_SPEED
+        if self.recoil_t:
+            direction += self.recoil_u * self.recoil_t * RPS
+            self.recoil_t = max(self.recoil_t - dt, 0.0)
+        x, y, z = self.pos + direction*dt*PICO_SPEED
         if self.placeable(x=x): self.x = x % 12
         if self.placeable(y=y): self.y = y % 12
         if self.placeable(z=z): self.z = z % 9
 
     def shoot(self):
-        self.move(forward=-1)
+        """Shoot in the forward direction."""
+        if self.recoil_t: return
+        self.recoil_t = 1.0 / RPS
+        self.recoil_u = [0, 0, -1] @ self.rot
         self.shards[max(self.shards, default=0) + 1] = Shard(
             self.addr, self.space, self.pos, self.rot)
