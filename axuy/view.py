@@ -203,8 +203,6 @@ class View:
         Vertical synchronization.
     ctl : dict of (str, int)
         Input control.
-    lock : RLock
-        Compound data lock to avoid size change during iteration.
 
     Attributes
     ----------
@@ -218,8 +216,6 @@ class View:
         Enemies characters.
     colors : dict of (address, str)
         Color names of enemies.
-    lock : RLock
-        Compound data lock to avoid size change during iteration.
     window : GLFW window
     zmlvl : float
         Zoom level (from ZMIN to ZMAX).
@@ -233,12 +229,12 @@ class View:
         Processed executable code in GLSL for map rendering.
     mapva : moderngl.VertexArray
         Vertex data of the map.
-    prog3 : moderngl.Program
+    prog : moderngl.Program
         Processed executable code in GLSL
         for rendering picobots and their shards.
-    pva3 : moderngl.VertexArray
+    pva : moderngl.VertexArray
         Vertex data of picobots.
-    sva3 : moderngl.VertexArray
+    sva : moderngl.VertexArray
         Vertex data of shards.
     pfilter : moderngl.VertexArray
         Vertex data for filtering highly saturated colors.
@@ -246,7 +242,7 @@ class View:
         Processed executable code in GLSL for Gaussian blur.
     gausshva, gaussvva : moderngl.VertexArray
         Vertex data for Gaussian blur.
-    fringe : moderngl.Program
+    edge : moderngl.Program
         Processed executable code in GLSL for final combination
         of the bloom effect with additional chromatic aberration
         and barrel distortion.
@@ -260,7 +256,7 @@ class View:
         FPS during the last 5 seconds to display the average.
     """
 
-    def __init__(self, address, camera, space, config, lock):
+    def __init__(self, address, camera, space, config):
         # Create GLFW window
         if not glfw.init(): raise RuntimeError('Failed to initialize GLFW')
         glfw.window_hint(glfw.CLIENT_API, glfw.OPENGL_API)
@@ -284,7 +280,6 @@ class View:
         self.picos = {address: camera}
         self.colors = {address: randint(0, 5)}
         self.last_time = glfw.get_time()
-        self.lock = lock
 
         # Window's rendering and event-handling configuration
         glfw.set_window_icon(self.window, 1, Image.open(abspath('icon.png')))
@@ -332,11 +327,11 @@ class View:
         svb = [(context.buffer(OCTOVERTICES.tobytes()), '3f', 'in_vert')]
         sib = context.buffer(OCTOINDECIES.tobytes())
 
-        self.prog3 = context.program(vertex_shader=PICO_VERTEX,
-                                     geometry_shader=TRIANGLE_GEOMETRY,
-                                     fragment_shader=WORLD_FRAGMENT)
-        self.pva3 = context.vertex_array(self.prog3, pvb, pib)
-        self.sva3 = context.vertex_array(self.prog3, svb, sib)
+        self.prog = context.program(vertex_shader=PICO_VERTEX,
+                                    geometry_shader=TRIANGLE_GEOMETRY,
+                                    fragment_shader=WORLD_FRAGMENT)
+        self.pva = context.vertex_array(self.prog, pvb, pib)
+        self.sva = context.vertex_array(self.prog, svb, sib)
 
         self.pfilter = context.simple_vertex_array(
             context.program(vertex_shader=TEX_VERTEX,
@@ -352,12 +347,12 @@ class View:
         self.gaussv['height'].value = 256 * height / width
         self.gaussvva = context.simple_vertex_array(
             self.gaussv, context.buffer(QUAD), 'in_vert')
-        self.fringe = context.program(vertex_shader=TEX_VERTEX,
-                                      fragment_shader=COMBINE_FRAGMENT)
-        self.fringe['la'].value = 0
-        self.fringe['tex'].value = 1
+        self.edge = context.program(vertex_shader=TEX_VERTEX,
+                                    fragment_shader=COMBINE_FRAGMENT)
+        self.edge['la'].value = 0
+        self.edge['tex'].value = 1
         self.combine = context.simple_vertex_array(
-            self.fringe, context.buffer(QUAD), 'in_vert')
+            self.edge, context.buffer(QUAD), 'in_vert')
 
         size, table = (width, height), (256, height * 256 // width)
         self.fb = context.framebuffer(context.texture(size, 4),
@@ -416,6 +411,11 @@ class View:
     def height(self) -> int:
         """Viewport height."""
         return self.context.viewport[3]
+
+    @property
+    def health(self) -> float:
+        """Camera relative health point."""
+        return self.camera.health
 
     @property
     def pos(self) -> np.float32:
@@ -483,27 +483,27 @@ class View:
         """Return whether given keys are pressed."""
         return any(glfw.get_key(self.window, k) == glfw.PRESS for k in keys)
 
-    def prender(self, obj, va3, col, bright=1.0):
+    def prender(self, obj, va, col, bright):
         """Render the obj and its images in bounded 3D space."""
         rotation = Matrix44.from_matrix33(obj.rot).astype(np.float32).tobytes()
         position = obj.pos.astype(np.float32).tobytes()
-        self.prog3['rot'].write(rotation)
-        self.prog3['pos'].write(position)
-        self.prog3['color'].write(color(col, bright).tobytes())
-        va3.render(moderngl.TRIANGLES)
+        self.prog['rot'].write(rotation)
+        self.prog['pos'].write(position)
+        self.prog['color'].write(color(col, bright).tobytes())
+        va.render(moderngl.TRIANGLES)
 
     def render_pico(self, pico):
         """Render pico and its images in bounded 3D space."""
-        self.prender(pico, self.pva3, self.colors[pico.addr])
+        self.prender(pico, self.pva, self.colors[pico.addr], pico.health)
 
     def render_shard(self, shard):
         """Render shard and its images in bounded 3D space."""
-        self.prender(shard, self.sva3,
+        self.prender(shard, self.sva,
                      self.colors[shard.addr], shard.power/SHARD_LIFE)
 
-    def add_pico(self, address, position, rotation):
-        """Add picobot from addr at pos with rot."""
-        self.picos[address] = Picobot(address, self.space, position, rotation)
+    def add_pico(self, address):
+        """Add picobot from given address."""
+        self.picos[address] = Picobot(address, self.space)
         self.colors[address] = randint(0, 5)
 
     def render(self):
@@ -521,20 +521,20 @@ class View:
         self.mapva.render(moderngl.TRIANGLES)
 
         # Render picos and shards
-        self.prog3['visibility'].value = visibility
-        self.prog3['camera'].write(self.pos.tobytes())
-        self.prog3['vp'].write(vp)
+        self.prog['visibility'].value = visibility
+        self.prog['camera'].write(self.pos.tobytes())
+        self.prog['vp'].write(vp)
 
-        with self.lock:
-            for pico in self.picos.values():
-                shards = {}
-                for index, shard in pico.shards.items():
-                    if not shard.power: continue
-                    shard.update(self.fps)
-                    self.render_shard(shard)
-                    shards[index] = shard
-                pico.shards = shards
-                if pico is not self.camera: self.render_pico(pico)
+        picos = list(self.picos.values())
+        for pico in picos:
+            shards = {}
+            for index, shard in pico.shards.items():
+                shard.update(self.fps, picos)
+                if not shard.power: continue
+                self.render_shard(shard)
+                shards[index] = shard
+            pico.shards = shards
+            if pico is not self.camera: self.render_pico(pico)
 
     def update(self):
         """Handle input, update GLSL programs and render the map."""
@@ -549,7 +549,7 @@ class View:
         if self.is_pressed(self.key['backward']): forward -= 1
         if self.is_pressed(self.key['left']): right -= 1
         if self.is_pressed(self.key['right']): right += 1
-        self.camera.move(right, upward, forward)
+        self.camera.update(right, upward, forward)
         glfw.set_window_title(self.window, '{} - axuy@{}:{} ({})'.format(
                 self.postr, *self.addr, self.fpstr))
 
@@ -573,8 +573,8 @@ class View:
 
         self.context.screen.use()
         self.context.clear()
-        self.fringe['invfov'].value = 1.0 / self.fov**CONWAY
-        self.fringe['zoom'].value = (self.zmlvl + 1.0) / 100
+        self.edge['abrtn'].value = (self.fov*self.health) ** -CONWAY
+        self.edge['zoom'].value = (self.zmlvl + 1.0) / 100
         self.combine.render(moderngl.TRIANGLES)
         glfw.swap_buffers(self.window)
         glfw.poll_events()

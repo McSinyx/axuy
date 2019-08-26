@@ -19,7 +19,7 @@
 __doc__ = 'Axuy module for character class'
 
 from itertools import combinations
-from math import pi, sqrt
+from math import log10, pi, sqrt
 from random import random
 
 import numpy as np
@@ -33,6 +33,7 @@ OCTOVERTICES = np.float32([(a + b) / 2.0
                            for a, b in combinations(TETRAVERTICES, 2)])
 RPICO = norm(TETRAVERTICES[0])
 RSHARD = norm(OCTOVERTICES[0])
+RCOLL = RPICO * 2/3
 
 INVX = np.float32([[-1, 0, 0], [0, 1, 0], [0, 0, 1]])
 INVY = np.float32([[1, 0, 0], [0, -1, 0], [0, 0, 1]])
@@ -105,7 +106,7 @@ class Shard:
         if z is None: z = self.z
         return not placeable(self.space, x, y, z, r=RSHARD)
 
-    def update(self, fps):
+    def update(self, fps, picos):
         """Update states."""
         x, y, z = self.pos + self.forward/fps*SHARD_SPEED
         bounced = False
@@ -120,6 +121,12 @@ class Shard:
             bounced = True
         self.pos += self.forward / fps * SHARD_SPEED
         self.power -= bounced
+
+        for pico in picos:
+            distance = norm(pico.pos - self.pos)
+            if distance < RCOLL:
+                pico.health -= self.power * RCOLL
+                self.power = 0
 
     def sync(self, position, rotation, power) -> None:
         """Synchronize state received from other peers."""
@@ -136,6 +143,8 @@ class Picobot:
         IP address (host, port).
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
+    health : float, optional
+        Pico relative health.
     position : iterable of length 3 of floats, optional
         Position.
     rotation : np.ndarray of shape (3, 3) of np.float32, optional
@@ -147,6 +156,8 @@ class Picobot:
         IP address (host, port).
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
+    health : float
+        Pico relative health.
     x, y, z : floats
         Position.
     rot : np.ndarray of shape (3, 3) of np.float32
@@ -160,9 +171,11 @@ class Picobot:
     fps : float
         Currently rendered frames per second.
     """
-    def __init__(self, address, space, position=None, rotation=None):
+    def __init__(self, address, space,
+                 health=1.0, position=None, rotation=None):
         self.addr = address
         self.space = space
+        self.health = health
 
         if position is None:
             x, y, z = random()*12, random()*12, random()*9
@@ -183,7 +196,12 @@ class Picobot:
         self.fps = 60.0
 
     @property
-    def pos(self):
+    def dead(self) -> bool:
+        """Whether the pico is dead."""
+        return self.health < 0
+
+    @property
+    def pos(self) -> np.float32:
         """Position in a NumPy array."""
         return np.float32([self.x, self.y, self.z])
 
@@ -191,9 +209,9 @@ class Picobot:
     def pos(self, position):
         self.x, self.y, self.z = position
 
-    def sync(self, position, rotation, shards) -> None:
+    def sync(self, health, position, rotation, shards):
         """Synchronize state received from other peers."""
-        self.pos, self.rot = position, rotation
+        self.health, self.pos, self.rot = health, position, rotation
         for i, t in shards.items():
             pos, rot, power = t
             try:
@@ -215,13 +233,12 @@ class Picobot:
         self.rot = (matrix33.create_from_x_rotation(pitch)
                     @ matrix33.create_from_y_rotation(yaw) @ self.rot)
 
-    def move(self, right=0, upward=0, forward=0):
-        """Try to move in the given direction.
-
-        This is the equivalence of Shard.update
-        and should be called every loop.
-        """
+    def update(self, right=0, upward=0, forward=0):
+        """Recover health point and try to move in the given direction."""
+        if self.dead: return self.__init__(self.addr, self.space)   # respawn
         dt = 1.0 / self.fps
+        self.health = min(1.0, self.health + log10(self.health+1)*dt)
+
         direction = normalized(right, upward, forward) @ self.rot
         if self.recoil_t:
             direction += self.recoil_u * self.recoil_t * RPS
@@ -233,7 +250,7 @@ class Picobot:
 
     def shoot(self):
         """Shoot in the forward direction."""
-        if self.recoil_t: return
+        if self.recoil_t or self.dead: return
         self.recoil_t = 1.0 / RPS
         self.recoil_u = [0, 0, -1] @ self.rot
         self.shards[max(self.shards, default=0) + 1] = Shard(

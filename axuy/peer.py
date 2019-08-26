@@ -22,7 +22,7 @@ __doc__ = 'Axuy main loop'
 from argparse import ArgumentParser, RawTextHelpFormatter
 from pickle import dumps, loads
 from socket import socket, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR
-from threading import Event, RLock, Thread
+from threading import Event, Thread
 
 from .misc import mapgen, mapidgen, whilst
 from .pico import Picobot
@@ -39,7 +39,7 @@ class Peer:
         self.sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
         self.sock.bind((config.host, config.port))
         self.addr = self.sock.getsockname()
-        self.updated, lock = Event(), RLock()
+        self.updated  = Event()
 
         if config.seeder is None:
             mapid, self.peers = mapidgen(), []
@@ -50,11 +50,11 @@ class Peer:
 
         self.space = mapgen(mapid)
         self.pico = Picobot(self.addr, self.space)
-        self.view = View(self.addr, self.pico, self.space, config, lock)
+        self.view = View(self.addr, self.pico, self.space, config)
 
         Thread(target=self.serve, args=(mapid,), daemon=True).start()
         Thread(target=self.push, daemon=True).start()
-        Thread(target=self.pull, args=(lock,), daemon=True).start()
+        Thread(target=self.pull, daemon=True).start()
 
     def serve(self, mapid):
         """Initiate peers."""
@@ -72,23 +72,23 @@ class Peer:
     def push(self):
         """Send own state to peers."""
         self.updated.wait()
+        pico = self.pico
         shards = {i: (s.pos, s.rot, s.power)
-                  for i, s in self.pico.shards.items()}
-        data = dumps([self.pico.pos, self.pico.rot, shards])
+                  for i, s in pico.shards.items()}
+        data = dumps([pico.health, pico.pos, pico.rot, shards])
         for peer in self.peers:
             self.sock.sendto(data, peer)
         self.updated.clear()
 
     @whilst
-    def pull(self, lock):
+    def pull(self):
         """Receive peers' state."""
         data, addr = self.sock.recvfrom(1<<16)
-        pos, rot, shards = loads(data)
-        with lock:
-            if addr not in self.view.picos:
-                self.peers.append(addr)
-                self.view.add_pico(addr, pos, rot)
-            self.view.picos[addr].sync(pos, rot, shards)
+        health, pos, rot, shards = loads(data)
+        if addr not in self.view.picos:
+            self.peers.append(addr)
+            self.view.add_pico(addr)
+        self.view.picos[addr].sync(health, pos, rot, shards)
 
     def update(self):
         """Locally update the internal states."""
