@@ -201,6 +201,11 @@ class Picobot:
         return self.health < 0
 
     @property
+    def forward(self):
+        """Direction in a NumPy array."""
+        return self.rot[-1]
+
+    @property
     def pos(self) -> np.float32:
         """Position in a NumPy array."""
         return np.float32([self.x, self.y, self.z])
@@ -230,8 +235,9 @@ class Picobot:
         """Rotate yaw radians around y-axis
         and pitch radians around x-axis.
         """
-        self.rot = (matrix33.create_from_x_rotation(pitch)
-                    @ matrix33.create_from_y_rotation(yaw) @ self.rot)
+        self.rot = (matrix33.create_from_x_rotation(pitch, dtype=np.float32)
+                    @ matrix33.create_from_y_rotation(yaw, dtype=np.float32)
+                    @ self.rot)
 
     def update(self, right=0, upward=0, forward=0):
         """Recover health point and try to move in the given direction."""
@@ -252,6 +258,6 @@ class Picobot:
         """Shoot in the forward direction."""
         if self.recoil_t or self.dead: return
         self.recoil_t = 1.0 / RPS
-        self.recoil_u = [0, 0, -1] @ self.rot
+        self.recoil_u = -self.forward
         self.shards[max(self.shards, default=0) + 1] = Shard(
-            self.addr, self.space, self.pos, self.rot)
+            self.addr, self.space, self.pos + self.forward*RPICO, self.rot)

@@ -49,6 +49,7 @@ GLFW_VER_WARN = 'Your GLFW version appear to be lower than 3.3, '\
 
 ZMIN, ZMAX = -1.0, 1.0
 CONWAY = 1.303577269034
+ABRTN_MAX = 1.0
 
 QUAD = np.float32([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]).tobytes()
 OXY = np.float32([[0, 0, 0], [1, 0, 0], [1, 1, 0],
@@ -573,7 +574,11 @@ class View:
 
         self.context.screen.use()
         self.context.clear()
-        self.edge['abrtn'].value = (self.fov*self.health) ** -CONWAY
+        if self.camera.dead:
+            abrtn = ABRTN_MAX
+        else:
+            abrtn = min(ABRTN_MAX, (self.fov*self.health) ** -CONWAY)
+        self.edge['abrtn'].value = abrtn
         self.edge['zoom'].value = (self.zmlvl + 1.0) / 100
         self.combine.render(moderngl.TRIANGLES)
         glfw.swap_buffers(self.window)

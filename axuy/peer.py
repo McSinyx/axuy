@@ -16,7 +16,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
-__version__ = '0.0.4'
+__version__ = '0.0.5'
 __doc__ = 'Axuy main loop'
 
 from argparse import ArgumentParser, RawTextHelpFormatter
@@ -24,7 +24,7 @@ from pickle import dumps, loads
 from socket import socket, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR
 from threading import Event, Thread
 
-from .misc import mapgen, mapidgen, whilst
+from .misc import forever, mapgen, mapidgen
 from .pico import Picobot
 from .view import ConfigReader, View
 
@@ -68,7 +68,7 @@ class Peer:
                 conn.send(dumps((mapid, self.peers+[self.addr])))
                 conn.close()
 
-    @whilst
+    @forever
     def push(self):
         """Send own state to peers."""
         self.updated.wait()
@@ -80,7 +80,7 @@ class Peer:
             self.sock.sendto(data, peer)
         self.updated.clear()
 
-    @whilst
+    @forever
     def pull(self):
         """Receive peers' state."""
         data, addr = self.sock.recvfrom(1<<16)

@@ -16,6 +16,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
+from functools import wraps
 from itertools import (chain, combinations_with_replacement,
                        permutations, product)
 from random import choices, shuffle
@@ -38,6 +39,14 @@ def abspath(resource_name):
 def color(code, value):
     """Return NumPy float32 array of RGB colors from color name."""
     return COLORS[code] * (value + 1) * 0.5
+
+
+def forever(func):
+    """Return a function that calls func forever."""
+    @wraps(func)
+    def loop(*args, **kwargs):
+        while True: func(*args, **kwargs)
+    return loop
 
 
 def mapidgen(replacement=False):
@@ -102,10 +111,3 @@ def placeable(space, x, y, z, r):
         {twelve(x-r), twelve(x), twelve(x+r)},
         {twelve(y-r), twelve(y), twelve(y+r)},
         {nine(z-r), nine(z), nine(z+r)}))
-
-
-def whilst(func, cond=lambda:True):
-    """Call func until cond is broken."""
-    def loop(*args, **kwargs):
-        while cond(): func(*args, **kwargs)
-    return loop
