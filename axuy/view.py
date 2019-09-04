@@ -64,10 +64,10 @@ OCTOINDECIES = np.int32([0, 1, 2, 0, 1, 3, 4, 0, 2, 4, 0, 3,
                          2, 1, 5, 3, 1, 5, 2, 5, 4, 3, 5, 4])
 
 with open(abspath('shaders/map.vert')) as f: MAP_VERTEX = f.read()
+with open(abspath('shaders/map.frag')) as f: MAP_FRAGMENT = f.read()
 with open(abspath('shaders/pico.vert')) as f: PICO_VERTEX = f.read()
-with open(abspath('shaders/line.geom')) as f: LINE_GEOMETRY = f.read()
-with open(abspath('shaders/triangle.geom')) as f: TRIANGLE_GEOMETRY = f.read()
-with open(abspath('shaders/world.frag')) as f: WORLD_FRAGMENT = f.read()
+with open(abspath('shaders/pico.geom')) as f: PICO_GEOMETRY = f.read()
+with open(abspath('shaders/pico.frag')) as f: PICO_FRAGMENT = f.read()
 
 with open(abspath('shaders/tex.vert')) as f: TEX_VERTEX = f.read()
 with open(abspath('shaders/sat.frag')) as f: SAT_FRAGMENT = f.read()
@@ -317,8 +317,7 @@ class View:
 
         # GLSL program and vertex array for map rendering
         self.maprog = context.program(vertex_shader=MAP_VERTEX,
-                                      fragment_shader=WORLD_FRAGMENT)
-        self.maprog['color'].write(bytes((0, 0, 128, 63) * 3))
+                                      fragment_shader=MAP_FRAGMENT)
         mapvb = context.buffer(np.stack(vertices).astype(np.float32).tobytes())
         self.mapva = context.simple_vertex_array(self.maprog, mapvb, 'in_vert')
 
@@ -329,8 +328,8 @@ class View:
         sib = context.buffer(OCTOINDECIES.tobytes())
 
         self.prog = context.program(vertex_shader=PICO_VERTEX,
-                                    geometry_shader=TRIANGLE_GEOMETRY,
-                                    fragment_shader=WORLD_FRAGMENT)
+                                    geometry_shader=PICO_GEOMETRY,
+                                    fragment_shader=PICO_FRAGMENT)
         self.pva = context.vertex_array(self.prog, pvb, pib)
         self.sva = context.vertex_array(self.prog, svb, sib)
 
@@ -517,7 +516,6 @@ class View:
 
         # Render map
         self.maprog['visibility'].value = visibility
-        self.maprog['camera'].write(self.pos.tobytes())
         self.maprog['mvp'].write(vp)
         self.mapva.render(moderngl.TRIANGLES)
 
@@ -525,7 +523,6 @@ class View:
         self.prog['visibility'].value = visibility
         self.prog['camera'].write(self.pos.tobytes())
         self.prog['vp'].write(vp)
-
         picos = list(self.picos.values())
         for pico in picos:
             shards = {}

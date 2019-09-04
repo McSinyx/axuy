@@ -7,11 +7,10 @@ const float coeffs[13] = float[](
 uniform sampler2D tex;
 
 in vec2 coords[13];
-out vec4 f_color;
 
 void main(void)
 {
-	f_color = vec4(0.0);
+	gl_FragColor = vec4(0.0);
 	for (int i = 0; i < 13; ++i)
-		f_color += texture(tex, coords[i]) * coeffs[i];
+		gl_FragColor += texture(tex, coords[i]) * coeffs[i];
 }
