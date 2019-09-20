@@ -254,10 +254,18 @@ class Picobot:
         if self.placeable(y=y): self.y = y % 12
         if self.placeable(z=z): self.z = z % 9
 
-    def shoot(self):
-        """Shoot in the forward direction."""
+    def shoot(self, backward=False):
+        """Shoot in the forward direction unless specified otherwise."""
         if self.recoil_t or self.dead: return
         self.recoil_t = 1.0 / RPS
-        self.recoil_u = -self.forward
-        self.shards[max(self.shards, default=0) + 1] = Shard(
-            self.addr, self.space, self.pos + self.forward*RPICO, self.rot)
+        index = max(self.shards, default=0) + 1
+        if backward:
+            self.recoil_u = self.forward
+            self.shards[index] = Shard(self.addr, self.space,
+                                       -self.pos - self.recoil_u*RPICO,
+                                       -self.rot)
+        else:
+            self.recoil_u = -self.forward
+            self.shards[index] = Shard(self.addr, self.space,
+                                       self.pos - self.recoil_u*RPICO,
+                                       self.rot)

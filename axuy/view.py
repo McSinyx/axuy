@@ -41,7 +41,7 @@ from .misc import abspath, color, neighbors
 
 CONTROL_ALIASES = (('Move left', 'left'), ('Move right', 'right'),
                    ('Move forward', 'forward'), ('Move backward', 'backward'),
-                   ('Primary', '1st'))
+                   ('Primary', '1st'), ('Secondary', '2nd'))
 MOUSE_PATTERN = 'MOUSE_BUTTON_[1-{}]'.format(glfw.MOUSE_BUTTON_LAST + 1)
 INVALID_CONTROL_ERR = '{}: {} is not recognized as a valid control key'
 GLFW_VER_WARN = 'Your GLFW version appear to be lower than 3.3, '\
@@ -49,7 +49,7 @@ GLFW_VER_WARN = 'Your GLFW version appear to be lower than 3.3, '\
 
 ZMIN, ZMAX = -1.0, 1.0
 CONWAY = 1.303577269034
-ABRTN_MAX = 1.0
+ABRTN_MAX = 0.42069
 
 QUAD = np.float32([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]).tobytes()
 OXY = np.float32([[0, 0, 0], [1, 0, 0], [1, 1, 0],
@@ -399,8 +399,11 @@ class View:
 
         Present as a callback for GLFW MouseButton event.
         """
-        if button == self.mouse['1st'] and action == glfw.PRESS:
-            self.camera.shoot()
+        if action == glfw.PRESS:
+            if button == self.mouse['1st']:
+                self.camera.shoot()
+            elif button == self.mouse['2nd']:
+                self.camera.shoot(backward=True)
 
     @property
     def width(self) -> int:
