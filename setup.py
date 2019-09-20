@@ -6,7 +6,7 @@ with open('README.md') as f:
 
 setup(
     name='axuy',
-    version='0.0.5',
+    version='0.0.6',
     description='Minimalist first-person shooter',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -15,7 +15,7 @@ setup(
     author_email='vn.mcsinyx@gmail.com',
     license='AGPLv3+',
     classifiers=[
-        'Development Status :: 2 - Pre-Alpha',
+        'Development Status :: 3 - Alpha',
         'Environment :: MacOS X',
         'Environment :: Win32 (MS Windows)',
         'Environment :: X11 Applications',

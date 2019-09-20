@@ -6,11 +6,12 @@ Mininalist peer-to-peer first-person shooter
 
 ## Goals
 
-* To be written in pure Python and thus be portable
+* Written in pure Python and thus be portable
 * Easy to read codebase as well as easy on resources
-* Logically generate visuals
-* Be functional when possible
+* Generative visuals
+* Functional when possible
 * P2P communication based on calculated *trust*
+* Modularized for the ease of bot scripting
 
 ## Installation
 
