@@ -24,6 +24,7 @@ from pickle import dumps, loads
 from queue import Empty, Queue
 from socket import socket, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR
 from threading import Thread
+from typing import Iterator, Tuple
 
 from .misc import mapgen, mapidgen
 from .pico import Picobot
@@ -32,7 +33,29 @@ from .view import ConfigReader, View
 
 class Peer:
     """Axuy peer.
-    TODO: Documentation
+
+    Parameters
+    ----------
+    config : ConfigReader
+        Networking and other configurations.
+
+    Attributes
+    ----------
+    sock : socket
+        UDP socket for exchanging instantaneous states with other peers.
+    addr : Tuple[str, int]
+        Own's address.
+    q : Queue[Tuple[bytes, Tuple[str, int]]]
+        Queue of (data, addr), where addr is the address of the peer
+        who sent the raw data.
+    peers : List[Tuple[str, int], ...]
+        Addresses of connected peers.
+    space : numpy.ndarray of shape (12, 12, 9) of bools
+        3D array of occupied space.
+    pico : Picobot
+        Protagonist.
+    view : View
+        World representation and renderer.
     """
 
     def __init__(self, config):
@@ -61,6 +84,19 @@ class Peer:
         """Peer status."""
         return self.view.is_running
 
+    @property
+    def ready(self) -> Iterator[Tuple[bytes, Tuple[str, int]]]:
+        """Iterator of (data, addr) that can be used without waiting,
+        where addr is the address of the peer who sent the data.
+        """
+        while True:
+            try:
+                yield self.q.get_nowait()
+            except Empty:
+                break
+            else:
+                self.q.task_done()
+
     def serve(self, mapid):
         """Initiate other peers."""
         with socket() as server:    # TCP server
@@ -76,21 +112,17 @@ class Peer:
     def pull(self):
         """Receive other peers' state."""
         while self.is_running: self.q.put(self.sock.recvfrom(1<<16))
+        while not self.q.empty():
+            self.q.get()
+            self.q.task_done()
 
     def update(self):
         """Update the local states and send them to other peers."""
-        while True:
-            try:
-                data, addr = self.q.get_nowait()
-            except Empty:
-                break
-            else:
-                health, pos, rot, shards = loads(data)
-                if addr not in self.view.picos:
-                    self.peers.append(addr)
-                    self.view.add_pico(addr)
-                self.view.picos[addr].sync(health, pos, rot, shards)
-                self.q.task_done()
+        for data, addr in self.ready:
+            if addr not in self.view.picos:
+                self.peers.append(addr)
+                self.view.add_pico(addr)
+            self.view.picos[addr].sync(*loads(data))
 
         self.view.update()
         pico = self.pico
@@ -102,9 +134,6 @@ class Peer:
     def __enter__(self): return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        while not self.q.empty():
-            self.q.get()
-            self.q.task_done()
         self.q.join()
         self.sock.close()
         self.view.close()

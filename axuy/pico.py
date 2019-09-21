@@ -51,7 +51,7 @@ class Shard:
 
     Parameters
     ----------
-    address : (str, int)
+    address : Tuple[str, int]
         IP address (host, port).
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
@@ -64,7 +64,7 @@ class Shard:
 
     Attributes
     ----------
-    addr : (str, int)
+    addr : Tuple[str, int]
         IP address (host, port).
     power : int
         Relative destructive power.
@@ -83,7 +83,7 @@ class Shard:
         self.rot = rotation
 
     @property
-    def pos(self):
+    def pos(self) -> np.float32:
         """Position in a NumPy array."""
         return np.float32([self.x, self.y, self.z])
 
@@ -95,7 +95,7 @@ class Shard:
         self.z = z % 9
 
     @property
-    def forward(self):
+    def forward(self) -> np.float32:
         """Direction in a NumPy array."""
         return self.rot[-1]
 
@@ -139,7 +139,7 @@ class Picobot:
 
     Parameters
     ----------
-    address : (str, int)
+    address : Tuple[str, int]
         IP address (host, port).
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
@@ -152,7 +152,7 @@ class Picobot:
 
     Attributes
     ----------
-    addr : (str, int)
+    addr : Tuple[str, int]
         IP address (host, port).
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
@@ -162,7 +162,7 @@ class Picobot:
         Position.
     rot : np.ndarray of shape (3, 3) of np.float32
         Rotational matrix.
-    shards : dict of Shard
+    shards : Dict[int, Shard]
         Active shards.
     recoil_u : np.ndarray of length 3 of np.float32
         Recoil direction (unit vector).
@@ -201,7 +201,7 @@ class Picobot:
         return self.health < 0
 
     @property
-    def forward(self):
+    def forward(self) -> np.float32:
         """Direction in a NumPy array."""
         return self.rot[-1]
 

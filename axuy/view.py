@@ -91,13 +91,13 @@ class ConfigReader:
         Port to bind the peer to.
     seeder : str
         Address of the peer that created the map.
-    size : (int, int)
+    size : Tuple[int, int]
         GLFW window resolution.
     vsync : bool
         Vertical synchronization.
     zmlvl : float
         Zoom level.
-    key, mouse : dict of (str, int)
+    key, mouse : Dict[str, int]
         Input control.
     mouspeed : float
         Relative camera rotational speed.
@@ -192,30 +192,30 @@ class View:
 
     Parameters
     ----------
-    address : (str, int)
+    address : Tuple[str, int]
         IP address (host, port).
     camera : Picobot
         Protagonist whose view is the camera.
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
-    size : (int, int)
+    size : Tuple[int, int]
         GLFW window resolution.
     vsync : bool
         Vertical synchronization.
-    ctl : dict of (str, int)
+    ctl : Dict[str, int]
         Input control.
 
     Attributes
     ----------
-    addr : (str, int)
+    addr : Tuple[str, int]
         IP address (host, port).
     space : np.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
     camera : Picobot
         Protagonist whose view is the camera.
-    picos : dict of (address, Picobot)
+    picos : Dict[Tuple[str, int], Picobot]
         Enemies characters.
-    colors : dict of (address, str)
+    colors : Dict[Tuple[str, int], str]
         Color names of enemies.
     window : GLFW window
     zmlvl : float
@@ -253,7 +253,7 @@ class View:
         Frame buffers for bloom-effect post-processing.
     last_time : float
         timestamp in seconds of the previous frame.
-    fpses : deque of floats
+    fpses : Deque[float, ...]
         FPS during the last 5 seconds to display the average.
     """
 

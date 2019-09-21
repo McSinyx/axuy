@@ -19,6 +19,7 @@
 from itertools import (chain, combinations_with_replacement,
                        permutations, product)
 from random import choices, shuffle
+from typing import Iterator, List, Tuple
 
 import numpy
 from pkg_resources import resource_filename
@@ -30,17 +31,17 @@ SPACE = numpy.load(resource_filename('axuy', 'map.npy'))
 COLORS = tuple(map(numpy.float32, permutations((1.0, 0.5, 0.0))))
 
 
-def abspath(resource_name):
+def abspath(resource_name) -> str:
     """Return a true filesystem path for the specified resource."""
     return resource_filename('axuy', resource_name)
 
 
-def color(code, value):
+def color(code, value) -> numpy.float32:
     """Return NumPy float32 array of RGB colors from color name."""
     return COLORS[code] * (value + 1) * 0.5
 
 
-def mapidgen(replacement=False):
+def mapidgen(replacement=False) -> List[int, ...]:
     """Return a randomly generated map ID."""
     mapid = list(range(48))
     if replacement: return choices(mapid, k=48)
@@ -59,7 +60,7 @@ def mapgen(mapid):
     return space
 
 
-def neighbors(x, y, z):
+def neighbors(x, y, z) -> Iterator[Tuple[int, int, int]]:
     """Return a generator of coordinates of images point (x, y, z)
     in neighbor universes.
     """
@@ -71,7 +72,7 @@ def norm(vector):
     return numpy.sqrt(numpy.sum(vector**2))
 
 
-def normalized(*vector):
+def normalized(*vector) -> numpy.float32:
     """Return normalized vector as a NumPy array of float32."""
     v = numpy.float32(vector)
     if not v.any(): return v
@@ -95,7 +96,7 @@ def nine(x) -> int:
     return int(x % 9)
 
 
-def placeable(space, x, y, z, r):
+def placeable(space, x, y, z, r) -> bool:
     """Return whether a sphere of radius r
     can be placed at (x, y, z) in given space."""
     return not any(space[i][j][k] for i, j, k in product(
