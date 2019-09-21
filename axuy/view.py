@@ -20,7 +20,6 @@ __doc__ = 'Axuy module for map class'
 
 from collections import deque
 from configparser import ConfigParser
-from itertools import product
 from os.path import join as pathjoin, pathsep
 from math import degrees, log2, radians
 from random import randint
@@ -37,7 +36,7 @@ from PIL import Image
 from pyrr import Matrix44
 
 from .pico import TETRAVERTICES, OCTOVERTICES, SHARD_LIFE, Picobot
-from .misc import abspath, color, neighbors
+from .misc import abspath, color, mirror
 
 CONTROL_ALIASES = (('Move left', 'left'), ('Move right', 'right'),
                    ('Move forward', 'forward'), ('Move backward', 'backward'),
@@ -52,13 +51,6 @@ CONWAY = 1.303577269034
 ABRTN_MAX = 0.42069
 
 QUAD = np.float32([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]).tobytes()
-OXY = np.float32([[0, 0, 0], [1, 0, 0], [1, 1, 0],
-                  [1, 1, 0], [0, 1, 0], [0, 0, 0]])
-OYZ = np.float32([[0, 0, 0], [0, 1, 0], [0, 1, 1],
-                  [0, 1, 1], [0, 0, 1], [0, 0, 0]])
-OZX = np.float32([[0, 0, 0], [1, 0, 0], [1, 0, 1],
-                  [1, 0, 1], [0, 0, 1], [0, 0, 0]])
-
 TETRAINDECIES = np.int32([0, 1, 2, 3, 1, 2, 0, 3, 2, 0, 3, 1])
 OCTOINDECIES = np.int32([0, 1, 2, 0, 1, 3, 4, 0, 2, 4, 0, 3,
                          2, 1, 5, 3, 1, 5, 2, 5, 4, 3, 5, 4])
@@ -276,10 +268,8 @@ class View:
         self.fpses = deque()
 
         # Attributes for event-handling
-        self.addr = address
-        self.camera = camera
-        self.picos = {address: camera}
-        self.colors = {address: randint(0, 5)}
+        self.addr, self.camera, self.space = address, camera, space
+        self.picos, self.colors = {address: camera}, {address: randint(0, 5)}
         self.last_time = glfw.get_time()
 
         # Window's rendering and event-handling configuration
@@ -305,20 +295,10 @@ class View:
         self.context = context = moderngl.create_context()
         context.enable_only(moderngl.DEPTH_TEST)
 
-        # Map creation
-        self.space, vertices = space, []
-        for (x, y, z), occupied in np.ndenumerate(self.space):
-            if self.space[x][y][z-1] ^ occupied:
-                vertices.extend(i+j for i,j in product(neighbors(x,y,z), OXY))
-            if self.space[x-1][y][z] ^ occupied:
-                vertices.extend(i+j for i,j in product(neighbors(x,y,z), OYZ))
-            if self.space[x][y-1][z] ^ occupied:
-                vertices.extend(i+j for i,j in product(neighbors(x,y,z), OZX))
-
         # GLSL program and vertex array for map rendering
         self.maprog = context.program(vertex_shader=MAP_VERTEX,
                                       fragment_shader=MAP_FRAGMENT)
-        mapvb = context.buffer(np.stack(vertices).astype(np.float32).tobytes())
+        mapvb = context.buffer(mirror(space).tobytes())
         self.mapva = context.simple_vertex_array(self.maprog, mapvb, 'in_vert')
 
         # GLSL programs and vertex arrays for picos and shards rendering
@@ -537,6 +517,40 @@ class View:
             pico.shards = shards
             if pico is not self.camera: self.render_pico(pico)
 
+    def draw(self):
+        """Render and post-process."""
+        # Render to framebuffer
+        self.fb.use()
+        self.fb.clear()
+        self.render()
+        self.fb.color_attachments[0].use()
+        self.ping.use()
+        self.ping.clear()
+        self.pfilter.render(moderngl.TRIANGLES)
+        self.ping.color_attachments[0].use()
+
+        # Gaussian blur
+        self.pong.use()
+        self.pong.clear()
+        self.gausshva.render(moderngl.TRIANGLES)
+        self.pong.color_attachments[0].use()
+        self.ping.use()
+        self.ping.clear()
+        self.gaussvva.render(moderngl.TRIANGLES)
+        self.ping.color_attachments[0].use()
+
+        # Combine for glow effect, chromatic aberration and barrel distortion
+        self.context.screen.use()
+        self.context.clear()
+        if self.camera.dead:
+            abrtn = ABRTN_MAX
+        else:
+            abrtn = min(ABRTN_MAX, (self.fov*self.health) ** -CONWAY)
+        self.edge['abrtn'].value = abrtn
+        self.edge['zoom'].value = (self.zmlvl + 1.0) / 100
+        self.combine.render(moderngl.TRIANGLES)
+        glfw.swap_buffers(self.window)
+
     def update(self):
         """Handle input, update GLSL programs and render the map."""
         # Update instantaneous FPS
@@ -551,37 +565,9 @@ class View:
         if self.is_pressed(self.key['left']): right -= 1
         if self.is_pressed(self.key['right']): right += 1
         self.camera.update(right, upward, forward)
+        self.draw()
         glfw.set_window_title(self.window, '{} - axuy@{}:{} ({})'.format(
                 self.postr, *self.addr, self.fpstr))
-
-        self.fb.use()
-        self.fb.clear()
-        self.render()
-        self.fb.color_attachments[0].use()
-        self.ping.use()
-        self.ping.clear()
-        self.pfilter.render(moderngl.TRIANGLES)
-        self.ping.color_attachments[0].use()
-
-        self.pong.use()
-        self.pong.clear()
-        self.gausshva.render(moderngl.TRIANGLES)
-        self.pong.color_attachments[0].use()
-        self.ping.use()
-        self.ping.clear()
-        self.gaussvva.render(moderngl.TRIANGLES)
-        self.ping.color_attachments[0].use()
-
-        self.context.screen.use()
-        self.context.clear()
-        if self.camera.dead:
-            abrtn = ABRTN_MAX
-        else:
-            abrtn = min(ABRTN_MAX, (self.fov*self.health) ** -CONWAY)
-        self.edge['abrtn'].value = abrtn
-        self.edge['zoom'].value = (self.zmlvl + 1.0) / 100
-        self.combine.render(moderngl.TRIANGLES)
-        glfw.swap_buffers(self.window)
         glfw.poll_events()
 
     def close(self):
