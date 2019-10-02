@@ -17,8 +17,8 @@
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
 __doc__ = 'Axuy miscellaneous functions'
-__all__ = ['abspath', 'color', 'mapidgen', 'mapgen', 'mirror', 'norm',
-           'normalized', 'sign', 'placeable']
+__all__ = ['abspath', 'color', 'mapidgen', 'mapgen', 'neighbors', 'mirror',
+           'norm', 'normalized', 'sign', 'twelve', 'nine', 'placeable']
 
 from itertools import (chain, combinations_with_replacement,
                        permutations, product)

@@ -70,6 +70,24 @@ class DispConfig(PeerConfig):
         Zoom level.
     """
 
+    def __init__(self):
+        PeerConfig.__init__(self)
+        self.options.add_argument(
+            '--size', type=int, nargs=2, metavar=('X', 'Y'),
+            help='the desired screen size (fallback: {}x{})'.format(
+                *self.size))
+        self.options.add_argument(
+            '--vsync', action='store_true', default=None,
+            help='enable vertical synchronization (fallback: {})'.format(
+                self.vsync))
+        self.options.add_argument(
+            '--no-vsync', action='store_false', dest='vsync',
+            help='disable vertical synchronization')
+        self.options.add_argument(
+            '--fov', type=float, metavar='DEGREES',
+            help='horizontal field of view (fallback: {:})'.format(
+                round(self.fov)))
+
     @property
     def fov(self) -> float:
         """Horizontal field of view in degrees."""
@@ -89,17 +107,17 @@ class DispConfig(PeerConfig):
             return
         self.zmlvl = log2(rad)
 
-    def parse(self):
-        """Parse configurations."""
-        PeerConfig.parse(self)
+    def fallback(self):
+        """Parse fallback configurations."""
+        PeerConfig.fallback(self)
         self.size = (self.config.getint('Graphics', 'Screen width'),
                      self.config.getint('Graphics', 'Screen height'))
         self.vsync = self.config.getboolean('Graphics', 'V-sync')
         self.fov = self.config.getfloat('Graphics', 'FOV')
 
-    def read_args(self, arguments):
+    def read(self, arguments):
         """Read and parse a argparse.ArgumentParser.Namespace."""
-        PeerConfig.read_args(self, arguments)
+        PeerConfig.read(self, arguments)
         for option in 'size', 'vsync', 'fov':
             value = getattr(arguments, option)
             if value is not None: setattr(self, option, value)
@@ -149,8 +167,6 @@ class Display(Peer):
         Vertex data for final combination of the bloom effect.
     fb, ping, pong : moderngl.Framebuffer
         Frame buffers for bloom-effect post-processing.
-    last_time : float
-        timestamp in seconds of the previous frame.
     fpses : Deque[float]
         FPS during the last 5 seconds to display the average.
     """
@@ -174,7 +190,6 @@ class Display(Peer):
             glfw.terminate()
             raise RuntimeError('Failed to create GLFW window')
         self.fpses = deque()
-        self.last_time = glfw.get_time()
 
         # Window's rendering and event-handling configuration
         glfw.set_window_icon(self.window, 1, Image.open(abspath('icon.png')))
@@ -311,21 +326,15 @@ class Display(Peer):
         return np.float32(3240 / (self.fov + 240))
 
     @property
-    def fps(self) -> float:
-        """Currently rendered frames per second."""
-        return self.camera.fps
-
-    @fps.setter
-    def fps(self, fps):
-        self.camera.fps = fps
-        self.fpses.appendleft(fps)
-
-    @property
     def fpstr(self) -> str:
         """Pretty string for displaying average FPS."""
         # Average over 5 seconds, like how glxgears do it, but less efficient
         while len(self.fpses) > mean(self.fpses) * 5 > 0: self.fpses.pop()
         return '{} fps'.format(round(mean(self.fpses)))
+
+    def get_time(self) -> float:
+        """Return the current time."""
+        return glfw.get_time()
 
     def prender(self, obj, va, col, bright):
         """Render the obj and its images in bounded 3D space."""
@@ -367,19 +376,16 @@ class Display(Peer):
         self.prog['visibility'].value = visibility
         self.prog['camera'].write(self.pos.tobytes())
         self.prog['vp'].write(vp)
-        picos = list(self.picos.values())
-        for pico in picos:
-            shards = {}
-            for index, shard in pico.shards.items():
-                shard.update(self.fps, picos)
-                if not shard.power: continue
-                self.render_shard(shard)
-                shards[index] = shard
-            pico.shards = shards
+        for pico in self.picos.values():
+            for shard in pico.shards.values(): self.render_shard(shard)
             if pico is not self.camera: self.render_pico(pico)
 
-    def draw(self):
-        """Render and post-process."""
+    def update(self):
+        """Update and render the map."""
+        # Update states
+        Peer.update(self)
+        self.fpses.appendleft(self.fps)
+
         # Render to framebuffer
         self.fb.use()
         self.fb.clear()
@@ -411,15 +417,6 @@ class Display(Peer):
         self.edge['zoom'].value = (self.zmlvl + 1.0) / 100
         self.combine.render(moderngl.TRIANGLES)
         glfw.swap_buffers(self.window)
-
-    def update(self):
-        """Update and render the map."""
-        next_time = glfw.get_time()
-        self.fps = 1 / (next_time-self.last_time)
-        self.last_time = next_time
-        Peer.update(self)
-        # Render
-        self.draw()
         glfw.set_window_title(self.window, '{} - axuy@{}:{} ({})'.format(
             self.postr, *self.addr, self.fpstr))
 

@@ -35,4 +35,4 @@ setup(
                       'moderngl', 'glfw>=1.8', 'Pillow'],
     package_data={'axuy': ['map.npy', 'shaders/*',
                            'icon.png', 'settings.ini']},
-    entry_points={'console_scripts': ['axuy = axuy.control:main']})
+    entry_points={'console_scripts': ['axuy = axuy.__main__:main']})

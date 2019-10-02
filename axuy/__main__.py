@@ -1,4 +1,4 @@
-# package initialization
+# main loop
 # Copyright (C) 2019  Nguyễn Gia Phong
 #
 # This file is part of Axuy
@@ -16,20 +16,17 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
-__doc__ = """Axuy is a minimalist peer-to-peer first-person shooter.
+__doc__ = 'Axuy main loop'
+__all__ = ['main']
 
-This package provides abstractions for writing custom front-ends and AIs.
-All classes and helper functions are exposed at the package level.
+from .control import CtlConfig, Control
 
-Some superclasses may define abstract methods which must be overridden
-in derived classes.  Subclasses only document newly introduced attributes.
-"""
 
-from .misc import *
-from .pico import *
-from .peer import *
-from .display import *
-from .control import *
+def main():
+    """Parse arguments and start main loop."""
+    config = CtlConfig()
+    config.parse()
+    with Control(config) as peer: peer.run()
 
-__all__ = (misc.__all__ + pico.__all__ + peer.__all__
-           + display.__all__ + control.__all__)
+
+if __name__ == '__main__': main()

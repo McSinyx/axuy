@@ -18,13 +18,16 @@
 
 __doc__ = 'Axuy peer'
 __all__ = ['PeerConfig', 'Peer']
+__version__ = '0.0.7'
 
 from abc import ABC, abstractmethod
+from argparse import ArgumentParser, FileType, RawTextHelpFormatter
 from configparser import ConfigParser
 from os.path import join as pathjoin, pathsep
 from pickle import dumps, loads
 from queue import Empty, Queue
 from socket import socket, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR
+from sys import stdout
 from threading import Thread
 from typing import Iterator, Tuple
 
@@ -32,6 +35,8 @@ from appdirs import AppDirs
 
 from .misc import abspath, mapgen, mapidgen
 from .pico import Pico
+
+SETTINGS = abspath('settings.ini')
 
 
 class PeerConfig:
@@ -41,6 +46,8 @@ class PeerConfig:
     ----------
     config : ConfigParser
         INI configuration file parser.
+    options : ArgumentParser
+        Command-line argument parser.
     host : str
         Host to bind the peer to.
     port : int
@@ -55,9 +62,39 @@ class PeerConfig:
         parents.append(dirs.user_config_dir)
         filenames = [pathjoin(parent, 'settings.ini') for parent in parents]
 
+        # Parse configuration files
         self.config = ConfigParser()
-        self.config.read(abspath('settings.ini'))    # default configuration
+        self.config.read(SETTINGS)
         self.config.read(filenames)
+        self.fallback()
+
+        # Parse command-line arguments
+        self.options = ArgumentParser(usage='%(prog)s [options]',
+                                      formatter_class=RawTextHelpFormatter)
+        self.options.add_argument('-v', '--version', action='version',
+                                  version='Axuy {}'.format(__version__))
+        self.options.add_argument(
+            '--write-config', nargs='?', const=stdout, type=FileType('w'),
+            metavar='PATH', dest='cfgout',
+            help='write default config to PATH (fallback: stdout) and exit')
+        self.options.add_argument(
+            '-c', '--config', metavar='PATH',
+            help='location of the configuration file (fallback: {})'.format(
+                pathsep.join(filenames)))
+        self.options.add_argument(
+            '--host',
+            help='host to bind this peer to (fallback: {})'.format(self.host))
+        self.options.add_argument(
+            '-p', '--port', type=int,
+            help='port to bind this peer to (fallback: {})'.format(self.port))
+        self.options.add_argument(
+            '-s', '--seeder', metavar='ADDRESS',
+            help='address of the peer that created the map')
+
+    def fallback(self):
+        """Parse fallback configurations."""
+        self.host = self.config.get('Peer', 'Host')
+        self.port = self.config.getint('Peer', 'Port')
 
     # Fallback to None when attribute is missing
     def __getattr__(self, name): return None
@@ -65,23 +102,30 @@ class PeerConfig:
     @property
     def seeder(self) -> Tuple[str, int]:
         """Seeder address."""
-        return self._seed
+        return self.__seed
 
     @seeder.setter
     def seeder(self, value):
         host, port = value.split(':')
-        self._seed = host, int(port)
+        self.__seed = host, int(port)
 
-    def parse(self):
-        """Parse configurations."""
-        self.host = self.config.get('Peer', 'Host')
-        self.port = self.config.getint('Peer', 'Port')
-
-    def read_args(self, arguments):
+    def read(self, arguments):
         """Read and parse a argparse.ArgumentParser.Namespace."""
         for option in 'host', 'port', 'seeder':
             value = getattr(arguments, option)
             if value is not None: setattr(self, option, value)
+
+    def parse(self):
+        """Parse all configurations."""
+        args = self.options.parse_args()
+        if args.cfgout is not None:
+            with open(SETTINGS) as f: args.cfgout.write(f.read())
+            args.cfgout.close()
+            exit()
+        if args.config:     # is neither None nor empty
+            self.config.read(args.config)
+            self.fallback()
+        self.read(args)
 
 
 class Peer(ABC):
@@ -109,8 +153,8 @@ class Peer(ABC):
         Protagonist.
     picos : Dict[Tuple[str, int], Pico]
         All picos present in the map.
-    view : View
-        World representation and renderer.
+    last_time : float
+        Timestamp of the previous update.
     """
 
     def __init__(self, config):
@@ -130,6 +174,7 @@ class Peer(ABC):
         self.space = mapgen(mapid)
         self.pico = Pico(self.addr, self.space)
         self.picos = {self.addr: self.pico}
+        self.last_time = self.get_time()
 
         Thread(target=self.serve, args=(mapid,), daemon=True).start()
         Thread(target=self.pull, daemon=True).start()
@@ -151,6 +196,15 @@ class Peer(ABC):
                 break
             else:
                 self.q.task_done()
+
+    @property
+    def fps(self) -> float:
+        """Current loop rate."""
+        return self.pico.fps
+
+    @fps.setter
+    def fps(self, fps):
+        self.pico.fps = fps
 
     def serve(self, mapid):
         """Initiate other peers."""
@@ -174,6 +228,10 @@ class Peer(ABC):
 
     def __enter__(self): return self
 
+    @abstractmethod
+    def get_time(self) -> float:
+        """Return the current time."""
+
     def sync(self):
         """Synchronize states received from other peers."""
         for data, addr in self.ready:
@@ -193,12 +251,26 @@ class Peer(ABC):
     def control(self):
         """Control the protagonist."""
 
-    @abstractmethod
     def update(self):
         """Update internal states and send them to other peers."""
+        next_time = self.get_time()
+        self.fps = 1 / (next_time-self.last_time)
+        self.last_time = next_time
+
         self.sync()
         self.control()
+        picos = list(self.picos.values())
+        for pico in picos:
+            shards = {}
+            for index, shard in pico.shards.items():
+                shard.update(self.fps, picos)
+                if shard.power: shards[index] = shard
+            pico.shards = shards
         self.push()
+
+    def run(self):
+        """Start main loop."""
+        while self.is_running: self.update()
 
     @abstractmethod
     def close(self):

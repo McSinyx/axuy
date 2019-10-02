@@ -18,9 +18,7 @@
 
 __doc__ = 'Axuy handling of user control using GLFW'
 __all__ = ['CtlConfig', 'Control']
-__version__ = '0.0.7'
 
-from argparse import ArgumentParser, RawTextHelpFormatter
 from re import IGNORECASE, match
 from warnings import warn
 
@@ -52,19 +50,29 @@ class CtlConfig(DispConfig):
         Zoom speed, in scroll steps per zoom range.
     """
 
+    def __init__(self):
+        DispConfig.__init__(self)
+        self.options.add_argument(
+            '--mouse-speed', type=float, dest='mouspeed',
+            help='camera rotational speed (fallback: {:.1f})'.format(
+                self.__mouspeed))
+        self.options.add_argument(
+            '--zoom-speed', type=float, dest='zmspeed',
+            help='zoom speed (fallback: {:.1f})'.format(self.zmspeed))
+
     @property
     def mouspeed(self) -> float:
         """Relative mouse speed."""
         # Standard to radians per inch for a 800 DPI mouse, at FOV of 60
-        return self._mouspeed / 800
+        return self.__mouspeed / 800
 
     @mouspeed.setter
     def mouspeed(self, value):
-        self._mouspeed = value
+        self.__mouspeed = value
 
-    def parse(self):
-        """Parse configurations."""
-        DispConfig.parse(self)
+    def fallback(self):
+        """Parse fallback configurations."""
+        DispConfig.fallback(self)
         self.mouspeed = self.config.getfloat('Control', 'Mouse speed')
         self.zmspeed = self.config.getfloat('Control', 'Zoom speed')
         self.key, self.mouse = {}, {}
@@ -78,9 +86,9 @@ class CtlConfig(DispConfig):
             except AttributeError:
                 raise ValueError(INVALID_CONTROL_ERR.format(cmd, i))
 
-    def read_args(self, arguments):
+    def read(self, arguments):
         """Read and parse a argparse.ArgumentParser.Namespace."""
-        DispConfig.read_args(self, arguments)
+        DispConfig.read(self, arguments)
         for option in 'fov', 'mouspeed', 'zmspeed':
             value = getattr(arguments, option)
             if value is not None: setattr(self, option, value)
@@ -163,49 +171,3 @@ class Control(Display):
         if self.is_pressed(self.key['left']): right -= 1
         if self.is_pressed(self.key['right']): right += 1
         self.camera.update(right, upward, forward)
-
-
-def main():
-    """Parse arguments and start main loop."""
-    # Read configuration files
-    config = CtlConfig()
-    config.parse()
-
-    # Parse command-line arguments
-    parser = ArgumentParser(usage='%(prog)s [options]',
-                            formatter_class=RawTextHelpFormatter)
-    parser.add_argument('-v', '--version', action='version',
-                        version='Axuy {}'.format(__version__))
-    parser.add_argument(
-        '--host',
-        help='host to bind this peer to (fallback: {})'.format(config.host))
-    parser.add_argument(
-        '-p', '--port', type=int,
-        help='port to bind this peer to (fallback: {})'.format(config.port))
-    parser.add_argument('-s', '--seeder',
-                        help='address of the peer that created the map')
-    # All these options specific for a graphical peer need to be modularized.
-    parser.add_argument(
-        '--size', type=int, nargs=2, metavar=('X', 'Y'),
-        help='the desired screen size (fallback: {}x{})'.format(*config.size))
-    parser.add_argument(
-        '--vsync', action='store_true', default=None,
-        help='enable vertical synchronization (fallback: {})'.format(
-            config.vsync))
-    parser.add_argument('--no-vsync', action='store_false', dest='vsync',
-                        help='disable vertical synchronization')
-    parser.add_argument(
-        '--fov', type=float,
-        help='horizontal field of view (fallback: {:.1f})'.format(config.fov))
-    parser.add_argument(
-        '--mouse-speed', type=float, dest='mouspeed',
-        help='camera rotational speed (fallback: {:.1f})'.format(
-            config._mouspeed))
-    parser.add_argument(
-        '--zoom-speed', type=float, dest='zmspeed',
-        help='zoom speed (fallback: {:.1f})'.format(config.zmspeed))
-    args = parser.parse_args()
-    config.read_args(args)
-
-    with Control(config) as peer:
-        while peer.is_running: peer.update()
