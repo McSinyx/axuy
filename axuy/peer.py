@@ -1,4 +1,4 @@
-# peer.py - peer main loop
+# p2p networking
 # Copyright (C) 2019  Nguyễn Gia Phong
 #
 # This file is part of Axuy
@@ -16,28 +16,81 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
-__version__ = '0.0.6'
-__doc__ = 'Axuy main loop'
+__doc__ = 'Axuy peer'
+__all__ = ['PeerConfig', 'Peer']
 
-from argparse import ArgumentParser, RawTextHelpFormatter
+from abc import ABC, abstractmethod
+from configparser import ConfigParser
+from os.path import join as pathjoin, pathsep
 from pickle import dumps, loads
 from queue import Empty, Queue
 from socket import socket, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR
 from threading import Thread
 from typing import Iterator, Tuple
 
-from .misc import mapgen, mapidgen
-from .pico import Picobot
-from .view import ConfigReader, View
+from appdirs import AppDirs
+
+from .misc import abspath, mapgen, mapidgen
+from .pico import Pico
 
 
-class Peer:
+class PeerConfig:
+    """Networking configurations
+
+    Attributes
+    ----------
+    config : ConfigParser
+        INI configuration file parser.
+    host : str
+        Host to bind the peer to.
+    port : int
+        Port to bind the peer to.
+    seeder : str
+        Address of the peer that created the map.
+    """
+
+    def __init__(self):
+        dirs = AppDirs(appname='axuy', appauthor=False, multipath=True)
+        parents = dirs.site_config_dir.split(pathsep)
+        parents.append(dirs.user_config_dir)
+        filenames = [pathjoin(parent, 'settings.ini') for parent in parents]
+
+        self.config = ConfigParser()
+        self.config.read(abspath('settings.ini'))    # default configuration
+        self.config.read(filenames)
+
+    # Fallback to None when attribute is missing
+    def __getattr__(self, name): return None
+
+    @property
+    def seeder(self) -> Tuple[str, int]:
+        """Seeder address."""
+        return self._seed
+
+    @seeder.setter
+    def seeder(self, value):
+        host, port = value.split(':')
+        self._seed = host, int(port)
+
+    def parse(self):
+        """Parse configurations."""
+        self.host = self.config.get('Peer', 'Host')
+        self.port = self.config.getint('Peer', 'Port')
+
+    def read_args(self, arguments):
+        """Read and parse a argparse.ArgumentParser.Namespace."""
+        for option in 'host', 'port', 'seeder':
+            value = getattr(arguments, option)
+            if value is not None: setattr(self, option, value)
+
+
+class Peer(ABC):
     """Axuy peer.
 
     Parameters
     ----------
-    config : ConfigReader
-        Networking and other configurations.
+    config : PeerConfig
+        Networking configurations.
 
     Attributes
     ----------
@@ -52,8 +105,10 @@ class Peer:
         Addresses of connected peers.
     space : numpy.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
-    pico : Picobot
+    pico : Pico
         Protagonist.
+    picos : Dict[Tuple[str, int], Pico]
+        All picos present in the map.
     view : View
         World representation and renderer.
     """
@@ -73,16 +128,16 @@ class Peer:
             mapid, self.peers = loads(client.recv(1024))
 
         self.space = mapgen(mapid)
-        self.pico = Picobot(self.addr, self.space)
-        self.view = View(self.addr, self.pico, self.space, config)
+        self.pico = Pico(self.addr, self.space)
+        self.picos = {self.addr: self.pico}
 
         Thread(target=self.serve, args=(mapid,), daemon=True).start()
         Thread(target=self.pull, daemon=True).start()
 
     @property
+    @abstractmethod
     def is_running(self) -> bool:
         """Peer status."""
-        return self.view.is_running
 
     @property
     def ready(self) -> Iterator[Tuple[bytes, Tuple[str, int]]]:
@@ -104,82 +159,54 @@ class Peer:
             server.bind(self.addr)
             server.listen(7)
             print('Axuy is listening at {}:{}'.format(*self.addr))
-            while True:
+            while self.is_running:
                 conn, addr = server.accept()
                 conn.send(dumps((mapid, self.peers+[self.addr])))
                 conn.close()
+            server.close()
 
     def pull(self):
-        """Receive other peers' state."""
-        while self.is_running: self.q.put(self.sock.recvfrom(1<<16))
+        """Receive other peers' states."""
+        while self.is_running: self.q.put(self.sock.recvfrom(1 << 16))
         while not self.q.empty():
             self.q.get()
             self.q.task_done()
 
-    def update(self):
-        """Update the local states and send them to other peers."""
-        for data, addr in self.ready:
-            if addr not in self.view.picos:
-                self.peers.append(addr)
-                self.view.add_pico(addr)
-            self.view.picos[addr].sync(*loads(data))
+    def __enter__(self): return self
 
-        self.view.update()
-        pico = self.pico
+    def sync(self):
+        """Synchronize states received from other peers."""
+        for data, addr in self.ready:
+            if addr not in self.picos:
+                self.peers.append(addr)
+                self.add_pico(addr)
+            self.picos[addr].sync(*loads(data))
+
+    def push(self):
+        """Push states to other peers."""
         shards = {i: (s.pos, s.rot, s.power)
-                  for i, s in pico.shards.items()}
-        data = dumps([pico.health, pico.pos, pico.rot, shards])
+                  for i, s in self.pico.shards.items()}
+        data = dumps([self.pico.health, self.pico.pos, self.pico.rot, shards])
         for peer in self.peers: self.sock.sendto(data, peer)
 
-    def __enter__(self): return self
+    @abstractmethod
+    def control(self):
+        """Control the protagonist."""
+
+    @abstractmethod
+    def update(self):
+        """Update internal states and send them to other peers."""
+        self.sync()
+        self.control()
+        self.push()
+
+    @abstractmethod
+    def close(self):
+        """Explicitly terminate stuff in subclass
+        that cannot be garbage collected.
+        """
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.q.join()
         self.sock.close()
-        self.view.close()
-
-
-def main():
-    """Parse arguments and start main loop."""
-    # Read configuration files
-    config = ConfigReader()
-    config.parse()
-
-    # Parse command-line arguments
-    parser = ArgumentParser(usage='%(prog)s [options]',
-                            formatter_class=RawTextHelpFormatter)
-    parser.add_argument('-v', '--version', action='version',
-                        version='Axuy {}'.format(__version__))
-    parser.add_argument(
-        '--host',
-        help='host to bind this peer to (fallback: {})'.format(config.host))
-    parser.add_argument(
-        '-p', '--port', type=int,
-        help='port to bind this peer to (fallback: {})'.format(config.port))
-    parser.add_argument('-s', '--seeder',
-                        help='address of the peer that created the map')
-    # All these options specific for a graphical peer need to be modularized.
-    parser.add_argument(
-        '--size', type=int, nargs=2, metavar=('X', 'Y'),
-        help='the desired screen size (fallback: {}x{})'.format(*config.size))
-    parser.add_argument(
-        '--vsync', action='store_true', default=None,
-        help='enable vertical synchronization (fallback: {})'.format(
-            config.vsync))
-    parser.add_argument('--no-vsync', action='store_false', dest='vsync',
-                        help='disable vertical synchronization')
-    parser.add_argument(
-        '--fov', type=float,
-        help='horizontal field of view (fallback: {:.1f})'.format(config.fov))
-    parser.add_argument(
-        '--mouse-speed', type=float, dest='mouspeed',
-        help='camera rotational speed (fallback: {:.1f})'.format(
-            config._mouspeed))
-    parser.add_argument(
-        '--zoom-speed', type=float, dest='zmspeed',
-        help='zoom speed (fallback: {:.1f})'.format(config.zmspeed))
-    args = parser.parse_args()
-    config.read_args(args)
-
-    with Peer(config) as peer:
-        while peer.is_running: peer.update()
+        self.close()

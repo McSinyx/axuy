@@ -6,7 +6,7 @@ with open('README.md') as f:
 
 setup(
     name='axuy',
-    version='0.0.6',
+    version='0.0.7',
     description='Minimalist first-person shooter',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -35,4 +35,4 @@ setup(
                       'moderngl', 'glfw>=1.8', 'Pillow'],
     package_data={'axuy': ['map.npy', 'shaders/*',
                            'icon.png', 'settings.ini']},
-    entry_points={'console_scripts': ['axuy = axuy.peer:main']})
+    entry_points={'console_scripts': ['axuy = axuy.control:main']})

@@ -1,4 +1,4 @@
-# pico.py - game characters
+# game characters and bullets
 # Copyright (C) 2019  Nguyễn Gia Phong
 #
 # This file is part of Axuy
@@ -16,7 +16,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
-__doc__ = 'Axuy module for character class'
+__doc__ = 'Axuy module for character and bullet class'
+__all__ = ['Pico', 'Shard']
 
 from itertools import combinations
 from math import log10, pi, sqrt
@@ -46,7 +47,7 @@ RPS = 6     # rounds per second
 
 
 class Shard:
-    """Fragment broken or shot out of a Picobot, which is a regular
+    """Fragment broken or shot out of a Pico, which is a regular
     octahedron whose circumscribed sphere's radius is RSHARD.
 
     Parameters
@@ -129,11 +130,11 @@ class Shard:
                 self.power = 0
 
     def sync(self, position, rotation, power) -> None:
-        """Synchronize state received from other peers."""
+        """Synchronize states received from other peers."""
         self.pos, self.rot, self.power = position, rotation, power
 
 
-class Picobot:
+class Pico:
     """Game character, which is represented as a regular tetrahedron
     whose circumscribed sphere's radius is RPICO.
 
@@ -215,7 +216,7 @@ class Picobot:
         self.x, self.y, self.z = position
 
     def sync(self, health, position, rotation, shards):
-        """Synchronize state received from other peers."""
+        """Synchronize states received from other peers."""
         self.health, self.pos, self.rot = health, position, rotation
         for i, t in shards.items():
             pos, rot, power = t

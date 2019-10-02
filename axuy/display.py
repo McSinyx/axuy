@@ -1,4 +1,4 @@
-# view.py - maintain view on game world
+# graphical display of the game world using GLFW and ModernGL
 # Copyright (C) 2019  Nguyễn Gia Phong
 #
 # This file is part of Axuy
@@ -16,37 +16,25 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
-__doc__ = 'Axuy module for map class'
+__doc__ = 'Axuy graphical display using GLFW and ModernGL'
+__all__ = ['DispConfig', 'Display']
 
 from collections import deque
-from configparser import ConfigParser
-from os.path import join as pathjoin, pathsep
 from math import degrees, log2, radians
 from random import randint
-from re import IGNORECASE, match
 from statistics import mean
-from typing import Tuple
 from warnings import warn
 
 import glfw
 import moderngl
 import numpy as np
-from appdirs import AppDirs
 from PIL import Image
 from pyrr import Matrix44
 
-from .pico import TETRAVERTICES, OCTOVERTICES, SHARD_LIFE, Picobot
+from .peer import PeerConfig, Peer
+from .pico import TETRAVERTICES, OCTOVERTICES, SHARD_LIFE, Pico
 from .misc import abspath, color, mirror
 
-CONTROL_ALIASES = (('Move left', 'left'), ('Move right', 'right'),
-                   ('Move forward', 'forward'), ('Move backward', 'backward'),
-                   ('Primary', '1st'), ('Secondary', '2nd'))
-MOUSE_PATTERN = 'MOUSE_BUTTON_[1-{}]'.format(glfw.MOUSE_BUTTON_LAST + 1)
-INVALID_CONTROL_ERR = '{}: {} is not recognized as a valid control key'
-GLFW_VER_WARN = 'Your GLFW version appear to be lower than 3.3, '\
-                'which might cause stuttering camera rotation.'
-
-ZMIN, ZMAX = -1.0, 1.0
 CONWAY = 1.303577269034
 ABRTN_MAX = 0.42069
 
@@ -69,56 +57,18 @@ with open(abspath('shaders/gauss.frag')) as f: GAUSS_FRAGMENT = f.read()
 with open(abspath('shaders/comb.frag')) as f: COMBINE_FRAGMENT = f.read()
 
 
-class ConfigReader:
-    """Object reading and processing command-line arguments
-    and INI configuration file for Axuy.
+class DispConfig(PeerConfig):
+    """Graphical display configurations
 
     Attributes
     ----------
-    config : ConfigParser
-        INI configuration file parser.
-    host : str
-        Host to bind the peer to.
-    port : int
-        Port to bind the peer to.
-    seeder : str
-        Address of the peer that created the map.
     size : Tuple[int, int]
         GLFW window resolution.
     vsync : bool
         Vertical synchronization.
     zmlvl : float
         Zoom level.
-    key, mouse : Dict[str, int]
-        Input control.
-    mouspeed : float
-        Relative camera rotational speed.
-    zmspeed : float
-        Zoom speed, in scroll steps per zoom range.
     """
-
-    def __init__(self):
-        dirs = AppDirs(appname='axuy', appauthor=False, multipath=True)
-        parents = dirs.site_config_dir.split(pathsep)
-        parents.append(dirs.user_config_dir)
-        filenames = [pathjoin(parent, 'settings.ini') for parent in parents]
-
-        self.config = ConfigParser()
-        self.config.read(abspath('settings.ini'))    # default configuration
-        self.config.read(filenames)
-
-    # Fallback to None when attribute is missing
-    def __getattr__(self, name): return None
-
-    @property
-    def seeder(self) -> Tuple[str, int]:
-        """Seeder address."""
-        return self._seed
-
-    @seeder.setter
-    def seeder(self, value):
-        host, port = value.split(':')
-        self._seed = host, int(port)
 
     @property
     def fov(self) -> float:
@@ -139,83 +89,39 @@ class ConfigReader:
             return
         self.zmlvl = log2(rad)
 
-    @property
-    def mouspeed(self) -> float:
-        """Relative mouse speed."""
-        # Standard to radians per inch for a 800 DPI mouse, at FOV of 60
-        return self._mouspeed / 800
-
-    @mouspeed.setter
-    def mouspeed(self, value):
-        self._mouspeed = value
-
     def parse(self):
         """Parse configurations."""
+        PeerConfig.parse(self)
         self.size = (self.config.getint('Graphics', 'Screen width'),
                      self.config.getint('Graphics', 'Screen height'))
         self.vsync = self.config.getboolean('Graphics', 'V-sync')
         self.fov = self.config.getfloat('Graphics', 'FOV')
-        self.host = self.config.get('Peer', 'Host')
-        self.port = self.config.getint('Peer', 'Port')
-        self.mouspeed = self.config.getfloat('Control', 'Mouse speed')
-        self.zmspeed = self.config.getfloat('Control', 'Zoom speed')
-
-        self.key, self.mouse = {}, {}
-        for cmd, alias in CONTROL_ALIASES:
-            i = self.config.get('Control', cmd)
-            if match(MOUSE_PATTERN, i, flags=IGNORECASE):
-                self.mouse[alias] = getattr(glfw, i.upper())
-                continue
-            try:
-                self.key[alias] = getattr(glfw, 'KEY_{}'.format(i.upper()))
-            except AttributeError:
-                raise ValueError(INVALID_CONTROL_ERR.format(cmd, i))
 
     def read_args(self, arguments):
         """Read and parse a argparse.ArgumentParser.Namespace."""
-        for option in ('size', 'vsync', 'fov', 'mouspeed', 'zmspeed',
-                       'host', 'port', 'seeder'):
+        PeerConfig.read_args(self, arguments)
+        for option in 'size', 'vsync', 'fov':
             value = getattr(arguments, option)
             if value is not None: setattr(self, option, value)
 
 
-class View:
+class Display(Peer):
     """World map and camera placement.
 
     Parameters
     ----------
-    address : Tuple[str, int]
-        IP address (host, port).
-    camera : Picobot
-        Protagonist whose view is the camera.
-    space : np.ndarray of shape (12, 12, 9) of bools
-        3D array of occupied space.
-    size : Tuple[int, int]
-        GLFW window resolution.
-    vsync : bool
-        Vertical synchronization.
-    ctl : Dict[str, int]
-        Input control.
+    config : DispConfig
+        Display configurations.
 
     Attributes
     ----------
-    addr : Tuple[str, int]
-        IP address (host, port).
-    space : np.ndarray of shape (12, 12, 9) of bools
-        3D array of occupied space.
-    camera : Picobot
+    camera : Pico
         Protagonist whose view is the camera.
-    picos : Dict[Tuple[str, int], Picobot]
-        Enemies characters.
     colors : Dict[Tuple[str, int], str]
         Color names of enemies.
     window : GLFW window
     zmlvl : float
         Zoom level (from ZMIN to ZMAX).
-    zmspeed : float
-        Scroll steps per zoom range.
-    mouspeed : float
-        Relative camera rotational speed.
     context : moderngl.Context
         OpenGL context from which ModernGL objects are created.
     maprog : moderngl.Program
@@ -224,9 +130,9 @@ class View:
         Vertex data of the map.
     prog : moderngl.Program
         Processed executable code in GLSL
-        for rendering picobots and their shards.
+        for rendering picos and their shards.
     pva : moderngl.VertexArray
-        Vertex data of picobots.
+        Vertex data of picos.
     sva : moderngl.VertexArray
         Vertex data of shards.
     pfilter : moderngl.VertexArray
@@ -245,11 +151,11 @@ class View:
         Frame buffers for bloom-effect post-processing.
     last_time : float
         timestamp in seconds of the previous frame.
-    fpses : Deque[float, ...]
+    fpses : Deque[float]
         FPS during the last 5 seconds to display the average.
     """
 
-    def __init__(self, address, camera, space, config):
+    def __init__(self, config):
         # Create GLFW window
         if not glfw.init(): raise RuntimeError('Failed to initialize GLFW')
         glfw.window_hint(glfw.CLIENT_API, glfw.OPENGL_API)
@@ -258,18 +164,16 @@ class View:
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
         glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, True)
+
+        Peer.__init__(self, config)
+        self.camera, self.colors = self.pico, {self.addr: randint(0, 5)}
         width, height = config.size
         self.window = glfw.create_window(
-            width, height, 'axuy@{}:{}'.format(*address), None, None)
+            width, height, 'axuy@{}:{}'.format(*self.addr), None, None)
         if not self.window:
             glfw.terminate()
             raise RuntimeError('Failed to create GLFW window')
-        self.key, self.mouse = config.key, config.mouse
         self.fpses = deque()
-
-        # Attributes for event-handling
-        self.addr, self.camera, self.space = address, camera, space
-        self.picos, self.colors = {address: camera}, {address: randint(0, 5)}
         self.last_time = glfw.get_time()
 
         # Window's rendering and event-handling configuration
@@ -277,19 +181,6 @@ class View:
         glfw.make_context_current(self.window)
         glfw.swap_interval(config.vsync)
         glfw.set_window_size_callback(self.window, self.resize)
-        glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
-        glfw.set_input_mode(self.window, glfw.STICKY_KEYS, True)
-        self.mouspeed = config.mouspeed
-        glfw.set_cursor_pos_callback(self.window, self.look)
-        self.zmspeed, self.zmlvl = config.zmspeed, config.zmlvl
-        glfw.set_scroll_callback(self.window, self.zoom)
-        glfw.set_mouse_button_callback(self.window, self.shoot)
-
-        try:
-            if glfw.raw_mouse_motion_supported():
-                glfw.set_input_mode(self.window, glfw.RAW_MOUSE_MOTION, True)
-        except AttributeError:
-            warn(GLFW_VER_WARN, category=RuntimeWarning)
 
         # Create OpenGL context
         self.context = context = moderngl.create_context()
@@ -298,7 +189,7 @@ class View:
         # GLSL program and vertex array for map rendering
         self.maprog = context.program(vertex_shader=MAP_VERTEX,
                                       fragment_shader=MAP_FRAGMENT)
-        mapvb = context.buffer(mirror(space).tobytes())
+        mapvb = context.buffer(mirror(self.space).tobytes())
         self.mapva = context.simple_vertex_array(self.maprog, mapvb, 'in_vert')
 
         # GLSL programs and vertex arrays for picos and shards rendering
@@ -359,32 +250,6 @@ class View:
         self.ping = context.framebuffer(context.texture(table, 3))
         self.pong = context.framebuffer(context.texture(table, 3))
 
-    def look(self, window, xpos, ypos):
-        """Look according to cursor position.
-
-        Present as a callback for GLFW CursorPos event.
-        """
-        center = np.array(glfw.get_window_size(window)) / 2
-        glfw.set_cursor_pos(window, *center)
-        self.camera.rotate(*((center - [xpos, ypos]) * self.rotspeed))
-
-    def zoom(self, window, xoffset, yoffset):
-        """Adjust FOV according to vertical scroll."""
-        self.zmlvl += yoffset * 2 / self.zmspeed
-        self.zmlvl = max(self.zmlvl, ZMIN)
-        self.zmlvl = min(self.zmlvl, ZMAX)
-
-    def shoot(self, window, button, action, mods):
-        """Shoot on click.
-
-        Present as a callback for GLFW MouseButton event.
-        """
-        if action == glfw.PRESS:
-            if button == self.mouse['1st']:
-                self.camera.shoot()
-            elif button == self.mouse['2nd']:
-                self.camera.shoot(backward=True)
-
     @property
     def width(self) -> int:
         """Viewport width."""
@@ -428,17 +293,17 @@ class View:
     @property
     def is_running(self) -> bool:
         """GLFW window status."""
-        return not glfw.window_should_close(self.window)
+        try:
+            window = getattr(self, 'window')
+        except AttributeError:  # window is not yet created
+            return True
+        else:
+            return not glfw.window_should_close(window)
 
     @property
     def fov(self) -> float:
         """Horizontal field of view in degrees."""
         return degrees(2 ** self.zmlvl)
-
-    @property
-    def rotspeed(self) -> float:
-        """Camera rotational speed, calculated from FOV and mouse speed."""
-        return 2**self.zmlvl * self.mouspeed
 
     @property
     def visibility(self) -> np.float32:
@@ -462,10 +327,6 @@ class View:
         while len(self.fpses) > mean(self.fpses) * 5 > 0: self.fpses.pop()
         return '{} fps'.format(round(mean(self.fpses)))
 
-    def is_pressed(self, *keys) -> bool:
-        """Return whether given keys are pressed."""
-        return any(glfw.get_key(self.window, k) == glfw.PRESS for k in keys)
-
     def prender(self, obj, va, col, bright):
         """Render the obj and its images in bounded 3D space."""
         rotation = Matrix44.from_matrix33(obj.rot).astype(np.float32).tobytes()
@@ -485,8 +346,8 @@ class View:
                      self.colors[shard.addr], shard.power/SHARD_LIFE)
 
     def add_pico(self, address):
-        """Add picobot from given address."""
-        self.picos[address] = Picobot(address, self.space)
+        """Add pico from given address."""
+        self.picos[address] = Pico(address, self.space)
         self.colors[address] = randint(0, 5)
 
     def render(self):
@@ -552,23 +413,15 @@ class View:
         glfw.swap_buffers(self.window)
 
     def update(self):
-        """Handle input, update GLSL programs and render the map."""
-        # Update instantaneous FPS
+        """Update and render the map."""
         next_time = glfw.get_time()
         self.fps = 1 / (next_time-self.last_time)
         self.last_time = next_time
-
-        # Character movements
-        right, upward, forward = 0, 0, 0
-        if self.is_pressed(self.key['forward']): forward += 1
-        if self.is_pressed(self.key['backward']): forward -= 1
-        if self.is_pressed(self.key['left']): right -= 1
-        if self.is_pressed(self.key['right']): right += 1
-        self.camera.update(right, upward, forward)
+        Peer.update(self)
+        # Render
         self.draw()
         glfw.set_window_title(self.window, '{} - axuy@{}:{} ({})'.format(
-                self.postr, *self.addr, self.fpstr))
-        glfw.poll_events()
+            self.postr, *self.addr, self.fpstr))
 
     def close(self):
         """Close window."""

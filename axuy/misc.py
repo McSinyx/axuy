@@ -1,4 +1,4 @@
-# misc.py - miscellaneous functions
+# miscellaneous functions
 # Copyright (C) 2019  Nguyễn Gia Phong
 #
 # This file is part of Axuy
@@ -15,6 +15,10 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
+
+__doc__ = 'Axuy miscellaneous functions'
+__all__ = ['abspath', 'color', 'mapidgen', 'mapgen', 'mirror', 'norm',
+           'normalized', 'sign', 'placeable']
 
 from itertools import (chain, combinations_with_replacement,
                        permutations, product)
@@ -79,11 +83,11 @@ def mirror(space) -> numpy.float32:
     vertices = []
     for (x, y, z), occupied in numpy.ndenumerate(space):
         if space[x][y][z-1] ^ occupied:
-            vertices.extend(i+j for i,j in product(neighbors(x,y,z), OXY))
+            vertices.extend(i+j for i, j in product(neighbors(x, y, z), OXY))
         if space[x-1][y][z] ^ occupied:
-            vertices.extend(i+j for i,j in product(neighbors(x,y,z), OYZ))
+            vertices.extend(i+j for i, j in product(neighbors(x, y, z), OYZ))
         if space[x][y-1][z] ^ occupied:
-            vertices.extend(i+j for i,j in product(neighbors(x,y,z), OZX))
+            vertices.extend(i+j for i, j in product(neighbors(x, y, z), OZX))
     return numpy.stack(vertices).astype(numpy.float32)
 
 
