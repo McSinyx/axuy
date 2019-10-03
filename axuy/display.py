@@ -308,12 +308,7 @@ class Display(Peer):
     @property
     def is_running(self) -> bool:
         """GLFW window status."""
-        try:
-            window = getattr(self, 'window')
-        except AttributeError:  # window is not yet created
-            return True
-        else:
-            return not glfw.window_should_close(window)
+        return not glfw.window_should_close(self.window)
 
     @property
     def fov(self) -> float:
@@ -420,6 +415,6 @@ class Display(Peer):
         glfw.set_window_title(self.window, '{} - axuy@{}:{} ({})'.format(
             self.postr, *self.addr, self.fpstr))
 
-    def close(self):
-        """Close window."""
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.__exit__(self, exc_type, exc_value, traceback)
         glfw.terminate()

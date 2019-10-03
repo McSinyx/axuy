@@ -18,7 +18,7 @@
 
 __doc__ = 'Axuy peer'
 __all__ = ['PeerConfig', 'Peer']
-__version__ = '0.0.7'
+__version__ = '0.0.8'
 
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser, FileType, RawTextHelpFormatter
@@ -147,6 +147,8 @@ class Peer(ABC):
         who sent the raw data.
     peers : List[Tuple[str, int], ...]
         Addresses of connected peers.
+    mapid : List[int, ...]
+        Permutation of map building blocks.
     space : numpy.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
     pico : Pico
@@ -165,19 +167,18 @@ class Peer(ABC):
         self.q = Queue()
 
         if config.seeder is None:
-            mapid, self.peers = mapidgen(), []
+            self.mapid, self.peers = mapidgen(), []
         else:
             client = socket()
             client.connect(config.seeder)
-            mapid, self.peers = loads(client.recv(1024))
+            self.mapid, self.peers = loads(client.recv(1024))
 
-        self.space = mapgen(mapid)
+        self.space = mapgen(self.mapid)
         self.pico = Pico(self.addr, self.space)
         self.picos = {self.addr: self.pico}
         self.last_time = self.get_time()
 
-        Thread(target=self.serve, args=(mapid,), daemon=True).start()
-        Thread(target=self.pull, daemon=True).start()
+    def __enter__(self): return self
 
     @property
     @abstractmethod
@@ -206,7 +207,7 @@ class Peer(ABC):
     def fps(self, fps):
         self.pico.fps = fps
 
-    def serve(self, mapid):
+    def serve(self):
         """Initiate other peers."""
         with socket() as server:    # TCP server
             server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
@@ -215,7 +216,7 @@ class Peer(ABC):
             print('Axuy is listening at {}:{}'.format(*self.addr))
             while self.is_running:
                 conn, addr = server.accept()
-                conn.send(dumps((mapid, self.peers+[self.addr])))
+                conn.send(dumps((self.mapid, self.peers+[self.addr])))
                 conn.close()
             server.close()
 
@@ -225,8 +226,6 @@ class Peer(ABC):
         while not self.q.empty():
             self.q.get()
             self.q.task_done()
-
-    def __enter__(self): return self
 
     @abstractmethod
     def get_time(self) -> float:
@@ -270,15 +269,10 @@ class Peer(ABC):
 
     def run(self):
         """Start main loop."""
+        Thread(target=self.serve, daemon=True).start()
+        Thread(target=self.pull, daemon=True).start()
         while self.is_running: self.update()
-
-    @abstractmethod
-    def close(self):
-        """Explicitly terminate stuff in subclass
-        that cannot be garbage collected.
-        """
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.q.join()
         self.sock.close()
-        self.close()
