@@ -18,7 +18,7 @@
 
 __doc__ = 'Axuy miscellaneous functions'
 __all__ = ['abspath', 'color', 'mapidgen', 'mapgen', 'neighbors', 'mirror',
-           'norm', 'normalized', 'sign', 'twelve', 'nine', 'placeable']
+           'normalized', 'rot33', 'sign', 'twelve', 'nine', 'placeable']
 
 from itertools import (chain, combinations_with_replacement,
                        permutations, product)
@@ -26,7 +26,9 @@ from random import choices, shuffle
 from typing import Iterator, List, Tuple
 
 import numpy
+from numpy.linalg import norm
 from pkg_resources import resource_filename
+from pyrr import matrix33
 
 OXY = numpy.float32([[0, 0, 0], [1, 0, 0], [1, 1, 0],
                      [1, 1, 0], [0, 1, 0], [0, 0, 0]])
@@ -34,6 +36,7 @@ OYZ = numpy.float32([[0, 0, 0], [0, 1, 0], [0, 1, 1],
                      [0, 1, 1], [0, 0, 1], [0, 0, 0]])
 OZX = numpy.float32([[0, 0, 0], [1, 0, 0], [1, 0, 1],
                      [1, 0, 1], [0, 0, 1], [0, 0, 0]])
+AXIS = numpy.float32([0, -1, 0])
 
 NEIGHBORS = set(chain.from_iterable(
     map(permutations, combinations_with_replacement((-1, 0, 1), 3))))
@@ -91,16 +94,21 @@ def mirror(space) -> numpy.float32:
     return numpy.stack(vertices).astype(numpy.float32)
 
 
-def norm(vector):
-    """Return the norm of the given vector."""
-    return numpy.sqrt(numpy.sum(vector**2))
-
-
 def normalized(*vector) -> numpy.float32:
     """Return normalized vector as a NumPy array of float32."""
     v = numpy.float32(vector)
     if not v.any(): return v
     return v / norm(v)
+
+
+def rot33(magnitude, direction) -> numpy.float32:
+    """Return the 3x3 matrix of float32 which rotates
+    by the given magnitude and direction.
+    """
+    return matrix33.create_from_axis_rotation(
+        AXIS.dot(matrix33.create_from_z_rotation(direction)),
+        magnitude,
+        dtype=numpy.float32)
 
 
 def sign(x) -> int:

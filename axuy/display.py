@@ -184,6 +184,7 @@ class Display(Peer):
         Peer.__init__(self, config)
         self.camera, self.colors = self.pico, {self.addr: randint(0, 5)}
         width, height = config.size
+        self.zmlvl = config.zmlvl
         self.window = glfw.create_window(
             width, height, 'axuy@{}:{}'.format(*self.addr), None, None)
         if not self.window:
@@ -416,5 +417,5 @@ class Display(Peer):
             self.postr, *self.addr, self.fpstr))
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.__exit__(self, exc_type, exc_value, traceback)
+        Peer.__exit__(self, exc_type, exc_value, traceback)
         glfw.terminate()

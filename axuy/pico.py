@@ -24,9 +24,9 @@ from math import log10, pi, sqrt
 from random import random
 
 import numpy as np
-from pyrr import matrix33
+from numpy.linalg import norm
 
-from .misc import norm, normalized, placeable
+from .misc import normalized, placeable, rot33
 
 TETRAVERTICES = np.float32([[0, sqrt(8), -1], [sqrt(6), -sqrt(2), -1],
                             [0, 0, 3], [-sqrt(6), -sqrt(2), -1]]) / 18
@@ -40,8 +40,8 @@ INVX = np.float32([[-1, 0, 0], [0, 1, 0], [0, 0, 1]])
 INVY = np.float32([[1, 0, 0], [0, -1, 0], [0, 0, 1]])
 INVZ = np.float32([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
 
-PICO_SPEED = 1 + sqrt(5)        # in unit/s
-SHARD_SPEED = PICO_SPEED * 2    # in unit/s
+PICO_SPEED = 1 + sqrt(5)        # unit/s
+SHARD_SPEED = PICO_SPEED * 2    # unit/s
 SHARD_LIFE = 3  # bounces
 RPS = 6     # rounds per second
 
@@ -232,13 +232,9 @@ class Pico:
         if z is None: z = self.z
         return placeable(self.space, x, y, z, RPICO)
 
-    def rotate(self, yaw, pitch):
-        """Rotate yaw radians around y-axis
-        and pitch radians around x-axis.
-        """
-        self.rot = (matrix33.create_from_x_rotation(pitch, dtype=np.float32)
-                    @ matrix33.create_from_y_rotation(yaw, dtype=np.float32)
-                    @ self.rot)
+    def rotate(self, magnitude, direction):
+        """Rotate by the given magnitude and direction."""
+        self.rot = rot33(magnitude, direction) @ self.rot
 
     def update(self, right=0, upward=0, forward=0):
         """Recover health point and try to move in the given direction."""

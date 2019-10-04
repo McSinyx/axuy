@@ -19,6 +19,7 @@
 __doc__ = 'Axuy handling of user control using GLFW'
 __all__ = ['CtlConfig', 'Control']
 
+from cmath import polar
 from re import IGNORECASE, match
 from warnings import warn
 
@@ -114,7 +115,7 @@ class Control(Display):
         Display.__init__(self, config)
         self.key, self.mouse = config.key, config.mouse
         self.mouspeed = config.mouspeed
-        self.zmspeed, self.zmlvl = config.zmspeed, config.zmlvl
+        self.zmspeed = config.zmspeed
 
         glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
         glfw.set_input_mode(self.window, glfw.STICKY_KEYS, True)
@@ -127,11 +128,6 @@ class Control(Display):
         except AttributeError:
             warn(GLFW_VER_WARN, category=RuntimeWarning)
 
-    @property
-    def rotspeed(self) -> float:
-        """Camera rotational speed, calculated from FOV and mouse speed."""
-        return 2**self.zmlvl * self.mouspeed
-
     def look(self, window, xpos, ypos):
         """Look according to cursor position.
 
@@ -139,7 +135,8 @@ class Control(Display):
         """
         center = np.array(glfw.get_window_size(window)) / 2
         glfw.set_cursor_pos(window, *center)
-        self.camera.rotate(*((center - [xpos, ypos]) * self.rotspeed))
+        yaw, pitch = (center - [xpos, ypos]) * self.mouspeed * 2**self.zmlvl
+        self.camera.rotate(*polar(complex(yaw, pitch)))
 
     def zoom(self, window, xoffset, yoffset):
         """Adjust FOV according to vertical scroll."""
