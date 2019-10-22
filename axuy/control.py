@@ -24,7 +24,7 @@ from re import IGNORECASE, match
 from warnings import warn
 
 import glfw
-import numpy as np
+import numpy
 
 from .display import DispConfig, Display
 
@@ -39,7 +39,7 @@ ZMIN, ZMAX = -1.0, 1.0
 
 
 class CtlConfig(DispConfig):
-    """User control configurations
+    """User control configurations.
 
     Attributes
     ----------
@@ -105,6 +105,8 @@ class Control(Display):
 
     Attributes
     ----------
+    key, mouse : Dict[str, int]
+        Input control.
     zmspeed : float
         Scroll steps per zoom range.
     mouspeed : float
@@ -133,7 +135,7 @@ class Control(Display):
 
         Present as a callback for GLFW CursorPos event.
         """
-        center = np.array(glfw.get_window_size(window)) / 2
+        center = numpy.array(glfw.get_window_size(window)) / 2
         glfw.set_cursor_pos(window, *center)
         yaw, pitch = (center - [xpos, ypos]) * self.mouspeed * 2**self.zmlvl
         self.camera.rotate(*polar(complex(yaw, pitch)))
@@ -161,10 +163,10 @@ class Control(Display):
 
     def control(self):
         """Handle events controlling the protagonist."""
-        glfw.poll_events()
+        Display.control(self)
         right, upward, forward = 0, 0, 0
         if self.is_pressed(self.key['forward']): forward += 1
         if self.is_pressed(self.key['backward']): forward -= 1
         if self.is_pressed(self.key['left']): right -= 1
         if self.is_pressed(self.key['right']): right += 1
-        self.camera.update(right, upward, forward)
+        self.pico.update(right, upward, forward)

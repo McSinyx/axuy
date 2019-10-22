@@ -18,7 +18,7 @@
 
 __doc__ = 'Axuy peer'
 __all__ = ['PeerConfig', 'Peer']
-__version__ = '0.0.8'
+__version__ = '0.0.9'
 
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser, FileType, RawTextHelpFormatter
@@ -40,7 +40,7 @@ SETTINGS = abspath('settings.ini')
 
 
 class PeerConfig:
-    """Networking configurations
+    """Networking configurations.
 
     Attributes
     ----------
@@ -229,7 +229,11 @@ class Peer(ABC):
 
     @abstractmethod
     def get_time(self) -> float:
-        """Return the current time."""
+        """Return the current time in seconds."""
+
+    def add_pico(self, address):
+        """Add pico from given address."""
+        self.picos[address] = Pico(address, self.space)
 
     def sync(self):
         """Synchronize states received from other peers."""
@@ -249,6 +253,7 @@ class Peer(ABC):
     @abstractmethod
     def control(self):
         """Control the protagonist."""
+        self.pico.update()  # just a reminder that this needs to be called
 
     def update(self):
         """Update internal states and send them to other peers."""

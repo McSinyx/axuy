@@ -19,6 +19,7 @@
 __doc__ = 'Axuy graphical display using GLFW and ModernGL'
 __all__ = ['DispConfig', 'Display']
 
+from abc import abstractmethod
 from collections import deque
 from math import degrees, log2, radians
 from random import randint
@@ -32,7 +33,7 @@ from PIL import Image
 from pyrr import Matrix44
 
 from .peer import PeerConfig, Peer
-from .pico import TETRAVERTICES, OCTOVERTICES, SHARD_LIFE, Pico
+from .pico import TETRAVERTICES, OCTOVERTICES, SHARD_LIFE
 from .misc import abspath, color, mirror
 
 CONWAY = 1.303577269034
@@ -58,7 +59,7 @@ with open(abspath('shaders/comb.frag')) as f: COMBINE_FRAGMENT = f.read()
 
 
 class DispConfig(PeerConfig):
-    """Graphical display configurations
+    """Graphical display configurations.
 
     Attributes
     ----------
@@ -289,7 +290,7 @@ class Display(Peer):
     @property
     def postr(self) -> str:
         """Pretty camera position representation."""
-        return '[{:4.1f} {:4.1f} {:3.1f}]'.format(*self.camera.pos)
+        return '[{:4.1f} {:4.1f} {:3.1f}]'.format(*self.pos)
 
     @property
     def right(self) -> np.float32:
@@ -329,7 +330,7 @@ class Display(Peer):
         return '{} fps'.format(round(mean(self.fpses)))
 
     def get_time(self) -> float:
-        """Return the current time."""
+        """Return the current time in seconds."""
         return glfw.get_time()
 
     def prender(self, obj, va, col, bright):
@@ -352,7 +353,7 @@ class Display(Peer):
 
     def add_pico(self, address):
         """Add pico from given address."""
-        self.picos[address] = Pico(address, self.space)
+        Peer.add_pico(self, address)
         self.colors[address] = randint(0, 5)
 
     def render(self):
@@ -415,6 +416,11 @@ class Display(Peer):
         glfw.swap_buffers(self.window)
         glfw.set_window_title(self.window, '{} - axuy@{}:{} ({})'.format(
             self.postr, *self.addr, self.fpstr))
+
+    @abstractmethod
+    def control(self):
+        """Poll resizing and closing events."""
+        glfw.poll_events()
 
     def __exit__(self, exc_type, exc_value, traceback):
         Peer.__exit__(self, exc_type, exc_value, traceback)

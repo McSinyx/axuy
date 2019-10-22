@@ -17,8 +17,8 @@
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
 __doc__ = 'Axuy miscellaneous functions'
-__all__ = ['abspath', 'color', 'mapidgen', 'mapgen', 'neighbors', 'mirror',
-           'normalized', 'rot33', 'sign', 'twelve', 'nine', 'placeable']
+__all__ = ['abspath', 'color', 'twelve', 'nine', 'indexify', 'mapidgen',
+           'mapgen', 'neighbors', 'mirror', 'normalized', 'rot33', 'placeable']
 
 from itertools import (chain, combinations_with_replacement,
                        permutations, product)
@@ -55,6 +55,22 @@ def color(code, value) -> numpy.float32:
     return COLORS[code] * (value + 1) * 0.5
 
 
+def twelve(x) -> int:
+    """Shorthand for int(x % 12)."""
+    return int(x % 12)
+
+
+def nine(x) -> int:
+    """Shorthand for int(x % 9)."""
+    return int(x % 9)
+
+
+def indexify(iterable) -> Tuple[int, int, int]:
+    """Return a tuple of int to be used as indices of the map's space."""
+    x, y, z = iterable
+    return twelve(x), twelve(y), nine(y)
+
+
 def mapidgen(replacement=False) -> List[int]:
     """Return a randomly generated map ID."""
     mapid = list(range(48))
@@ -74,7 +90,7 @@ def mapgen(mapid):
     return space
 
 
-def neighbors(x, y, z) -> Iterator[Tuple[int, int, int]]:
+def neighbors(x, y, z) -> Iterator[Tuple[float, float, float]]:
     """Return a generator of coordinates of images point (x, y, z)
     in neighbor universes.
     """
@@ -101,6 +117,16 @@ def normalized(*vector) -> numpy.float32:
     return v / norm(v)
 
 
+def placeable(space, x, y, z, r=0) -> bool:
+    """Return whether a sphere of radius r
+    can be placed at (x, y, z) in given space.
+    """
+    return not any(space[i][j][k] for i, j, k in product(
+        {twelve(x-r), twelve(x), twelve(x+r)},
+        {twelve(y-r), twelve(y), twelve(y+r)},
+        {nine(z-r), nine(z), nine(z+r)}))
+
+
 def rot33(magnitude, direction) -> numpy.float32:
     """Return the 3x3 matrix of float32 which rotates
     by the given magnitude and direction.
@@ -109,29 +135,3 @@ def rot33(magnitude, direction) -> numpy.float32:
         AXIS.dot(matrix33.create_from_z_rotation(direction)),
         magnitude,
         dtype=numpy.float32)
-
-
-def sign(x) -> int:
-    """Return the sign of number x."""
-    if x > 0: return 1
-    if x: return -1
-    return 0
-
-
-def twelve(x) -> int:
-    """Shorthand for int(x % 12)."""
-    return int(x % 12)
-
-
-def nine(x) -> int:
-    """Shorthand for int(x % 9)."""
-    return int(x % 9)
-
-
-def placeable(space, x, y, z, r) -> bool:
-    """Return whether a sphere of radius r
-    can be placed at (x, y, z) in given space."""
-    return not any(space[i][j][k] for i, j, k in product(
-        {twelve(x-r), twelve(x), twelve(x+r)},
-        {twelve(y-r), twelve(y), twelve(y+r)},
-        {nine(z-r), nine(z), nine(z+r)}))

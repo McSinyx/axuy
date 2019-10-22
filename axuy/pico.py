@@ -17,10 +17,11 @@
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
 __doc__ = 'Axuy module for character and bullet class'
-__all__ = ['Pico', 'Shard']
+__all__ = ['TETRAVERTICES', 'OCTOVERTICES', 'RPICO', 'RSHARD', 'RCOLL', 'INV',
+           'PICO_SPEED', 'SHARD_SPEED', 'SHARD_LIFE', 'RPS', 'Pico', 'Shard']
 
 from itertools import combinations
-from math import log10, pi, sqrt
+from math import acos, atan2, log10, pi, sqrt
 from random import random
 
 import numpy as np
@@ -39,11 +40,12 @@ RCOLL = RPICO * 2/3
 INVX = np.float32([[-1, 0, 0], [0, 1, 0], [0, 0, 1]])
 INVY = np.float32([[1, 0, 0], [0, -1, 0], [0, 0, 1]])
 INVZ = np.float32([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
+INV = {'x': INVX, 'y': INVY, 'z': INVZ}
 
 PICO_SPEED = 1 + sqrt(5)        # unit/s
 SHARD_SPEED = PICO_SPEED * 2    # unit/s
 SHARD_LIFE = 3  # bounces
-RPS = 6     # rounds per second
+RPS = pi    # rounds per second
 
 
 class Shard:
@@ -109,24 +111,17 @@ class Shard:
 
     def update(self, fps, picos):
         """Update states."""
-        x, y, z = self.pos + self.forward/fps*SHARD_SPEED
         bounced = False
-        if self.should_bounce(x=x):
-            self.rot = self.rot @ INVX
-            bounced = True
-        if self.should_bounce(y=y):
-            self.rot = self.rot @ INVY
-            bounced = True
-        if self.should_bounce(z=z):
-            self.rot = self.rot @ INVZ
-            bounced = True
+        for axis, value in zip('xyz', self.pos+self.forward/fps*SHARD_SPEED):
+            if self.should_bounce(**{axis: value}):
+                self.rot = self.rot @ INV[axis]
+                bounced = True
         self.pos += self.forward / fps * SHARD_SPEED
         self.power -= bounced
 
         for pico in picos:
-            distance = norm(pico.pos - self.pos)
-            if distance < RCOLL:
-                pico.health -= self.power * RCOLL
+            if norm(pico.pos - self.pos) < RCOLL:
+                pico.health -= self.power / SHARD_LIFE / RPS
                 self.power = 0
 
     def sync(self, position, rotation, power) -> None:
@@ -236,6 +231,15 @@ class Pico:
         """Rotate by the given magnitude and direction."""
         self.rot = rot33(magnitude, direction) @ self.rot
 
+    def lookat(self, target):
+        """Look at the given target."""
+        # The matrix multiplication is in the following order
+        # because matrices are perceived differently by numpy and glsl.
+        right, upward, forward = normalized(*(self.rot @ (target - self.pos)))
+        # I don't understand why we need to flip
+        # the right coordinate here, but since it works...
+        self.rotate(acos(forward), atan2(upward, -right))
+
     def update(self, right=0, upward=0, forward=0):
         """Recover health point and try to move in the given direction."""
         if self.dead: return self.__init__(self.addr, self.space)   # respawn
@@ -251,18 +255,18 @@ class Pico:
         if self.placeable(y=y): self.y = y % 12
         if self.placeable(z=z): self.z = z % 9
 
+    def add_shard(self, pos, rot):
+        """Add a shard at pos with rotation rot."""
+        self.shards[max(self.shards, default=0) + 1] = Shard(
+            self.addr, self.space, pos-self.recoil_u*RPICO, rot)
+
     def shoot(self, backward=False):
         """Shoot in the forward direction unless specified otherwise."""
         if self.recoil_t or self.dead: return
         self.recoil_t = 1.0 / RPS
-        index = max(self.shards, default=0) + 1
         if backward:
             self.recoil_u = self.forward
-            self.shards[index] = Shard(self.addr, self.space,
-                                       -self.pos - self.recoil_u*RPICO,
-                                       -self.rot)
+            self.add_shard(-self.pos, -self.rot)
         else:
             self.recoil_u = -self.forward
-            self.shards[index] = Shard(self.addr, self.space,
-                                       self.pos - self.recoil_u*RPICO,
-                                       self.rot)
+            self.add_shard(self.pos, self.rot)

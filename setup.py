@@ -6,7 +6,7 @@ with open('README.md') as f:
 
 setup(
     name='axuy',
-    version='0.0.8',
+    version='0.0.9',
     description='Minimalist first-person shooter',
     long_description=long_description,
     long_description_content_type='text/markdown',
