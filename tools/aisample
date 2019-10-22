@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+# AI example
+# Copyright (C) 2019  Nguyễn Gia Phong
+#
+# This file is part of Axuy
+#
+# Axuy is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Axuy is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
+
+from itertools import chain
+from time import time
+
+from axuy import (INV, RCOLL, PICO_SPEED, SHARD_LIFE, neighbors,
+                  Shard, Peer, Display, DispConfig)
+from numpy import floor
+from numpy.linalg import norm
+
+
+class BotConfig(DispConfig):
+    """Bot configurations.
+
+    Attributes
+    ----------
+    headless : bool
+        Whether to disable graphical display.
+    """
+
+    def __init__(self):
+        DispConfig.__init__(self)
+        self.options.add_argument(
+            '--headless', action='store_true', default=False,
+            help='disable graphical display')
+
+    def read(self, arguments):
+        """Read and parse a argparse.ArgumentParser.Namespace."""
+        DispConfig.read(self, arguments)
+        self.headless = arguments.headless
+
+
+class HeadlessBot(Peer):
+    """Bot bouncing around and shooting the closest enemy.
+
+    Parameters
+    ----------
+    config : BotConfig
+        Bot configurations.
+    """
+
+    def is_running(self):
+        """Return True, since there is no interface
+        to terminate an headless peer.
+        """
+        return True
+
+    def get_time(self) -> float:
+        """Return the current time in seconds."""
+        return time()
+
+    def shoot(self, target) -> bool:
+        """Try to shoot the target and return if the shot was fired."""
+        rot = self.pico.rot
+        self.pico.lookat(target)
+        shard = Shard(self.addr, self.space, self.pico.pos, self.pico.rot)
+        while shard.power == SHARD_LIFE:
+            shard.update(self.fps, picos=[])
+            if norm(target - shard.pos) < RCOLL:
+                self.pico.shoot()
+                return True
+        self.pico.rot = rot
+        return False
+
+    def control(self):
+        """Wander and try to shoot the closest enemy."""
+        target = distance = False
+        for pos in chain.from_iterable(neighbors(*pico.pos)
+                                       for pico in self.picos.values()
+                                       if pico is not self.pico):
+            d = sum((floor(pos) - floor(self.pico.pos)) ** 2)
+            if not target or d < distance: target, distance = pos, d
+        if not target: return self.pico.update(forward=1)
+
+        speed = PICO_SPEED / self.fps
+        for axis, value in zip('xyz', self.pico.pos+self.pico.forward*speed):
+            if not self.pico.placeable(**{axis: value}):
+                self.pico.rot = self.pico.rot @ INV[axis]
+        return self.pico.update(forward=not self.shoot(target))
+
+
+class Bot(Display, HeadlessBot):
+    """Bot bouncing around and shooting the closest enemy,
+    with graphical display.
+
+    Parameters
+    ----------
+    config : BotConfig
+        Bot configurations.
+    """
+
+    def control(self):
+        """Wander and try to shoot the closest enemy."""
+        Display.control(self)
+        HeadlessBot.control(self)
+
+
+if __name__ == '__main__':
+    config = BotConfig()
+    config.parse()
+    with (HeadlessBot if config.headless else Bot)(config) as bot: bot.run()

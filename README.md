@@ -24,3 +24,6 @@ $ pip3 install --user --editable axuy
 $ axuy --port=42069 &
 $ axuy --seeder=:42069
 ```
+
+There is also `aisample` in `tools` as an automated example
+with similar command-line interface.
