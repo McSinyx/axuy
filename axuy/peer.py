@@ -18,7 +18,7 @@
 
 __doc__ = 'Axuy peer'
 __all__ = ['PeerConfig', 'Peer']
-__version__ = '0.0.9'
+__version__ = '0.0.10'
 
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser, FileType, RawTextHelpFormatter

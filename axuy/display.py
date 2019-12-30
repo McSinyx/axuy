@@ -30,7 +30,7 @@ import glfw
 import moderngl
 import numpy as np
 from PIL import Image
-from pyrr import Matrix44
+from pyrr import matrix44
 
 from .peer import PeerConfig, Peer
 from .pico import TETRAVERTICES, OCTOVERTICES, SHARD_LIFE
@@ -39,7 +39,7 @@ from .misc import abspath, color, mirror
 CONWAY = 1.303577269034
 ABRTN_MAX = 0.42069
 
-QUAD = np.float32([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]).tobytes()
+QUAD = np.float32([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1])
 TETRAINDECIES = np.int32([0, 1, 2, 3, 1, 2, 0, 3, 2, 0, 3, 1])
 OCTOINDECIES = np.int32([0, 1, 2, 0, 1, 3, 4, 0, 2, 4, 0, 3,
                          2, 1, 5, 3, 1, 5, 2, 5, 4, 3, 5, 4])
@@ -206,14 +206,14 @@ class Display(Peer):
         # GLSL program and vertex array for map rendering
         self.maprog = context.program(vertex_shader=MAP_VERTEX,
                                       fragment_shader=MAP_FRAGMENT)
-        mapvb = context.buffer(mirror(self.space).tobytes())
+        mapvb = context.buffer(mirror(self.space))
         self.mapva = context.simple_vertex_array(self.maprog, mapvb, 'in_vert')
 
         # GLSL programs and vertex arrays for picos and shards rendering
-        pvb = [(context.buffer(TETRAVERTICES.tobytes()), '3f', 'in_vert')]
-        pib = context.buffer(TETRAINDECIES.tobytes())
-        svb = [(context.buffer(OCTOVERTICES.tobytes()), '3f', 'in_vert')]
-        sib = context.buffer(OCTOINDECIES.tobytes())
+        pvb = [(context.buffer(TETRAVERTICES), '3f', 'in_vert')]
+        pib = context.buffer(TETRAINDECIES)
+        svb = [(context.buffer(OCTOVERTICES), '3f', 'in_vert')]
+        sib = context.buffer(OCTOINDECIES)
 
         self.prog = context.program(vertex_shader=PICO_VERTEX,
                                     geometry_shader=PICO_GEOMETRY,
@@ -221,26 +221,27 @@ class Display(Peer):
         self.pva = context.vertex_array(self.prog, pvb, pib)
         self.sva = context.vertex_array(self.prog, svb, sib)
 
+        quad_buffer = context.buffer(QUAD)
         self.pfilter = context.simple_vertex_array(
             context.program(vertex_shader=TEX_VERTEX,
                             fragment_shader=SAT_FRAGMENT),
-            context.buffer(QUAD), 'in_vert')
+            quad_buffer, 'in_vert')
         self.gaussh = context.program(vertex_shader=GAUSSH_VERTEX,
                                       fragment_shader=GAUSS_FRAGMENT)
         self.gaussh['width'].value = 256
         self.gausshva = context.simple_vertex_array(
-            self.gaussh, context.buffer(QUAD), 'in_vert')
+            self.gaussh, quad_buffer, 'in_vert')
         self.gaussv = context.program(vertex_shader=GAUSSV_VERTEX,
                                       fragment_shader=GAUSS_FRAGMENT)
         self.gaussv['height'].value = 256 * height / width
         self.gaussvva = context.simple_vertex_array(
-            self.gaussv, context.buffer(QUAD), 'in_vert')
+            self.gaussv, quad_buffer, 'in_vert')
         self.edge = context.program(vertex_shader=TEX_VERTEX,
                                     fragment_shader=COMBINE_FRAGMENT)
         self.edge['la'].value = 0
         self.edge['tex'].value = 1
         self.combine = context.simple_vertex_array(
-            self.edge, context.buffer(QUAD), 'in_vert')
+            self.edge, quad_buffer, 'in_vert')
 
         size, table = (width, height), (256, height * 256 // width)
         self.fb = context.framebuffer(context.texture(size, 4),
@@ -335,11 +336,10 @@ class Display(Peer):
 
     def prender(self, obj, va, col, bright):
         """Render the obj and its images in bounded 3D space."""
-        rotation = Matrix44.from_matrix33(obj.rot).astype(np.float32).tobytes()
-        position = obj.pos.astype(np.float32).tobytes()
-        self.prog['rot'].write(rotation)
-        self.prog['pos'].write(position)
-        self.prog['color'].write(color(col, bright).tobytes())
+        self.prog['rot'].write(
+            matrix44.create_from_matrix33(obj.rot, dtype=np.float32))
+        self.prog['pos'].write(obj.pos)
+        self.prog['color'].write(color(col, bright))
         va.render(moderngl.TRIANGLES)
 
     def render_pico(self, pico):
@@ -359,10 +359,12 @@ class Display(Peer):
     def render(self):
         """Render the scene before post-processing."""
         visibility = self.visibility
-        projection = Matrix44.perspective_projection(
-            self.fov, self.width/self.height, 3E-3, visibility)
-        view = Matrix44.look_at(self.pos, self.pos + self.forward, self.upward)
-        vp = (view @ projection).astype(np.float32).tobytes()
+        projection = matrix44.create_perspective_projection(
+            self.fov, self.width/self.height, 3E-3, visibility,
+            dtype=np.float32)
+        view = matrix44.create_look_at(
+            self.pos, self.pos+self.forward, self.upward, dtype=np.float32)
+        vp = view @ projection
 
         # Render map
         self.maprog['visibility'].value = visibility
@@ -371,7 +373,7 @@ class Display(Peer):
 
         # Render picos and shards
         self.prog['visibility'].value = visibility
-        self.prog['camera'].write(self.pos.tobytes())
+        self.prog['camera'].write(self.pos)
         self.prog['vp'].write(vp)
         for pico in self.picos.values():
             for shard in pico.shards.values(): self.render_shard(shard)

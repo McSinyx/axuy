@@ -6,7 +6,7 @@ with open('README.md') as f:
 
 setup(
     name='axuy',
-    version='0.0.9',
+    version='0.0.10',
     description='Minimalist first-person shooter',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -27,6 +27,7 @@ setup(
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3 :: Only',
         'Topic :: Games/Entertainment :: First Person Shooters'],
     keywords='fps p2p opengl glfw',
