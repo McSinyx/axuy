@@ -1,0 +1,34 @@
+[build-system]
+requires = ['flit_core >=2,<3']
+build-backend = 'flit_core.buildapi'
+
+[tool.flit.metadata]
+module = 'axuy'
+author = 'Nguyễn Gia Phong'
+author-email = 'mcsinyx@disroot.org'
+home-page = 'https://github.com/McSinyx/axuy'
+requires = ['appdirs', 'glfw>=1.8', 'moderngl',
+            'numpy', 'Pillow', 'pyrr', 'setuptools']
+description-file = 'README.md'
+classifiers = [
+    'Development Status :: 3 - Alpha',
+    'Environment :: MacOS X',
+    'Environment :: Win32 (MS Windows)',
+    'Environment :: X11 Applications',
+    'Intended Audience :: End Users/Desktop',
+    'License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)',
+    'Natural Language :: English',
+    'Operating System :: OS Independent',
+    'Programming Language :: Python :: 3.5',
+    'Programming Language :: Python :: 3.6',
+    'Programming Language :: Python :: 3.7',
+    'Programming Language :: Python :: 3.8',
+    'Programming Language :: Python :: 3.9',
+    'Programming Language :: Python :: 3 :: Only',
+    'Topic :: Games/Entertainment :: First Person Shooters']
+requires-python = '>=3.6'
+keywords = 'fps,p2p,opengl,glfw'
+license = 'AGPLv3+'
+
+[tool.flit.entrypoints.console_scripts]
+axuy = "axuy.__main__:main"

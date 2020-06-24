@@ -16,7 +16,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
-__doc__ = """Axuy is a minimalist peer-to-peer first-person shooter.
+"""Axuy is a minimalist peer-to-peer first-person shooter.
 
 This package provides abstractions for writing custom front-ends and AIs.
 All classes and helper functions are exposed at the package level.
@@ -25,11 +25,12 @@ Some superclasses may define abstract methods which must be overridden
 in derived classes.  Subclasses only document newly introduced attributes.
 """
 
-from .misc import *
-from .pico import *
-from .peer import *
-from .display import *
 from .control import *
+from .display import *
+from .misc import *
+from .peer import *
+from .pico import *
 
 __all__ = (misc.__all__ + pico.__all__ + peer.__all__
            + display.__all__ + control.__all__)
+__version__ = peer.__version__

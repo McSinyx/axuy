@@ -19,7 +19,7 @@
 __doc__ = 'Axuy main loop'
 __all__ = ['main']
 
-from .control import CtlConfig, Control
+from .control import Control, CtlConfig
 
 
 def main():

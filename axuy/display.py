@@ -32,9 +32,9 @@ import numpy as np
 from PIL import Image
 from pyrr import matrix44
 
-from .peer import PeerConfig, Peer
-from .pico import TETRAVERTICES, OCTOVERTICES, SHARD_LIFE
 from .misc import abspath, color, mirror
+from .peer import Peer, PeerConfig
+from .pico import OCTOVERTICES, SHARD_LIFE, TETRAVERTICES
 
 CONWAY = 1.303577269034
 ABRTN_MAX = 0.42069

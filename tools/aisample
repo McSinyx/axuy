@@ -20,8 +20,8 @@
 from itertools import chain
 from time import time
 
-from axuy import (INV, RCOLL, PICO_SPEED, SHARD_LIFE, neighbors,
-                  Shard, Peer, Display, DispConfig)
+from axuy import (INV, PICO_SPEED, RCOLL, SHARD_LIFE,
+                  DispConfig, Display, Peer, Shard, neighbors)
 from numpy import floor
 from numpy.linalg import norm
 

@@ -26,7 +26,7 @@ from configparser import ConfigParser
 from os.path import join as pathjoin, pathsep
 from pickle import dumps, loads
 from queue import Empty, Queue
-from socket import socket, SOCK_DGRAM, SOL_SOCKET, SO_REUSEADDR
+from socket import SO_REUSEADDR, SOCK_DGRAM, SOL_SOCKET, socket
 from sys import stdout
 from threading import Thread
 from typing import Iterator, Tuple
