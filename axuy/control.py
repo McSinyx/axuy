@@ -51,7 +51,7 @@ class CtlConfig(DispConfig):
         Zoom speed, in scroll steps per zoom range.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         DispConfig.__init__(self)
         self.options.add_argument(
             '--mouse-speed', type=float, dest='mouspeed',
@@ -68,10 +68,10 @@ class CtlConfig(DispConfig):
         return self.__mouspeed / 800
 
     @mouspeed.setter
-    def mouspeed(self, value):
+    def mouspeed(self, value: float) -> None:
         self.__mouspeed = value
 
-    def fallback(self):
+    def fallback(self) -> None:
         """Parse fallback configurations."""
         DispConfig.fallback(self)
         self.mouspeed = self.config.getfloat('Control', 'Mouse speed')
@@ -161,7 +161,7 @@ class Control(Display):
         """Return whether given keys are pressed."""
         return any(glfw.get_key(self.window, k) == glfw.PRESS for k in keys)
 
-    def control(self):
+    def control(self) -> None:
         """Handle events controlling the protagonist."""
         Display.control(self)
         right, upward, forward = 0, 0, 0

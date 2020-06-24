@@ -71,7 +71,7 @@ class DispConfig(PeerConfig):
         Zoom level.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         PeerConfig.__init__(self)
         self.options.add_argument(
             '--size', type=int, nargs=2, metavar=('X', 'Y'),
@@ -108,7 +108,7 @@ class DispConfig(PeerConfig):
             return
         self.zmlvl = log2(rad)
 
-    def fallback(self):
+    def fallback(self) -> None:
         """Parse fallback configurations."""
         PeerConfig.fallback(self)
         self.size = (self.config.getint('Graphics', 'Screen width'),
@@ -201,7 +201,7 @@ class Display(Peer):
 
         # Create OpenGL context
         self.context = context = moderngl.create_context()
-        context.enable_only(moderngl.DEPTH_TEST)
+        context.enable_only(context.DEPTH_TEST)
 
         # GLSL program and vertex array for map rendering
         self.maprog = context.program(vertex_shader=MAP_VERTEX,
@@ -356,7 +356,7 @@ class Display(Peer):
         Peer.add_pico(self, address)
         self.colors[address] = randint(0, 5)
 
-    def render(self):
+    def render(self) -> None:
         """Render the scene before post-processing."""
         visibility = self.visibility
         projection = matrix44.create_perspective_projection(
@@ -379,7 +379,7 @@ class Display(Peer):
             for shard in pico.shards.values(): self.render_shard(shard)
             if pico is not self.camera: self.render_pico(pico)
 
-    def update(self):
+    def update(self) -> None:
         """Update and render the map."""
         # Update states
         Peer.update(self)
@@ -420,7 +420,7 @@ class Display(Peer):
             self.postr, *self.addr, self.fpstr))
 
     @abstractmethod
-    def control(self):
+    def control(self) -> None:
         """Poll resizing and closing events."""
         glfw.poll_events()
 

@@ -56,7 +56,7 @@ class PeerConfig:
         Address of the peer that created the map.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         dirs = AppDirs(appname='axuy', appauthor=False, multipath=True)
         parents = dirs.site_config_dir.split(pathsep)
         parents.append(dirs.user_config_dir)
@@ -91,7 +91,7 @@ class PeerConfig:
             '-s', '--seeder', metavar='ADDRESS',
             help='address of the peer that created the map')
 
-    def fallback(self):
+    def fallback(self) -> None:
         """Parse fallback configurations."""
         self.host = self.config.get('Peer', 'Host')
         self.port = self.config.getint('Peer', 'Port')
@@ -105,7 +105,7 @@ class PeerConfig:
         return self.__seed
 
     @seeder.setter
-    def seeder(self, value):
+    def seeder(self, value: str) -> None:
         host, port = value.split(':')
         self.__seed = host, int(port)
 
@@ -115,7 +115,7 @@ class PeerConfig:
             value = getattr(arguments, option)
             if value is not None: setattr(self, option, value)
 
-    def parse(self):
+    def parse(self) -> None:
         """Parse all configurations."""
         args = self.options.parse_args()
         if args.cfgout is not None:
@@ -145,9 +145,9 @@ class Peer(ABC):
     q : Queue[Tuple[bytes, Tuple[str, int]]]
         Queue of (data, addr), where addr is the address of the peer
         who sent the raw data.
-    peers : List[Tuple[str, int], ...]
+    peers : List[Tuple[str, int]]
         Addresses of connected peers.
-    mapid : List[int, ...]
+    mapid : List[int]
         Permutation of map building blocks.
     space : numpy.ndarray of shape (12, 12, 9) of bools
         3D array of occupied space.
@@ -204,10 +204,10 @@ class Peer(ABC):
         return self.pico.fps
 
     @fps.setter
-    def fps(self, fps):
+    def fps(self, fps: float) -> None:
         self.pico.fps = fps
 
-    def serve(self):
+    def serve(self) -> None:
         """Initiate other peers."""
         with socket() as server:    # TCP server
             server.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
@@ -220,7 +220,7 @@ class Peer(ABC):
                 conn.close()
             server.close()
 
-    def pull(self):
+    def pull(self) -> None:
         """Receive other peers' states."""
         while self.is_running: self.q.put(self.sock.recvfrom(1 << 16))
         while not self.q.empty():
@@ -235,7 +235,7 @@ class Peer(ABC):
         """Add pico from given address."""
         self.picos[address] = Pico(address, self.space)
 
-    def sync(self):
+    def sync(self) -> None:
         """Synchronize states received from other peers."""
         for data, addr in self.ready:
             if addr not in self.picos:
@@ -243,7 +243,7 @@ class Peer(ABC):
                 self.add_pico(addr)
             self.picos[addr].sync(*loads(data))
 
-    def push(self):
+    def push(self) -> None:
         """Push states to other peers."""
         shards = {i: (s.pos, s.rot, s.power)
                   for i, s in self.pico.shards.items()}
@@ -251,11 +251,11 @@ class Peer(ABC):
         for peer in self.peers: self.sock.sendto(data, peer)
 
     @abstractmethod
-    def control(self):
+    def control(self) -> None:
         """Control the protagonist."""
         self.pico.update()  # just a reminder that this needs to be called
 
-    def update(self):
+    def update(self) -> None:
         """Update internal states and send them to other peers."""
         next_time = self.get_time()
         self.fps = 1 / (next_time-self.last_time)
@@ -272,7 +272,7 @@ class Peer(ABC):
             pico.shards = shards
         self.push()
 
-    def run(self):
+    def run(self) -> None:
         """Start main loop."""
         Thread(target=self.serve, daemon=True).start()
         Thread(target=self.pull, daemon=True).start()
