@@ -17,8 +17,8 @@
 # along with Axuy.  If not, see <https://www.gnu.org/licenses/>.
 
 __doc__ = 'Axuy peer'
-__all__ = ['PeerConfig', 'Peer']
-__version__ = '0.0.10'
+__all__ = ['__version__', 'PeerConfig', 'Peer']
+__version__ = '0.0.11'
 
 from abc import ABC, abstractmethod
 from argparse import ArgumentParser, FileType, RawTextHelpFormatter

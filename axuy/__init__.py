@@ -33,4 +33,3 @@ from .pico import *
 
 __all__ = (misc.__all__ + pico.__all__ + peer.__all__
            + display.__all__ + control.__all__)
-__version__ = peer.__version__
