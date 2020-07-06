@@ -367,7 +367,6 @@ class Display(Peer):
         vp = view @ projection
 
         # Render map
-        self.maprog['visibility'].value = visibility
         self.maprog['mvp'].write(vp)
         self.mapva.render(moderngl.TRIANGLES)
 
